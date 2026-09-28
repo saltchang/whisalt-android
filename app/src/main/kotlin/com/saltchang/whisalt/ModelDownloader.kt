@@ -20,9 +20,14 @@ data class Model(
 )
 
 val MODEL_CATALOG = listOf(
-    Model("SenseVoice (中文)", "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09",
-        166, "★★★★ 中英夾雜・台灣繁體",
-        "7305f7905bfcf77fa0b39388a313f3da35c68d971661a65475b56fb2162c8e63", recommended = true),
+    // 2024-07-17, not the newer 2025-09-09: that release has no punctuation, ITN or language
+    // detection (maintainer confirmed, k2-fsa/sherpa-onnx#3000)
+    Model("SenseVoice (中文)", "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17",
+        163, "★★★★ 中英夾雜・台灣繁體",
+        "7d1efa2138a65b0b488df37f8b89e3d91a60676e416f515b952358d83dfd347e", recommended = true),
+    Model("Qwen3-ASR 0.6B (中文)", "sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25",
+        879, "★★★★★ 中英夾雜最強・較慢",
+        "393f8a14e2f5fb96746aaab342997a40641001fbd5bf9592a080a8329178ee96"),
     Model("Parakeet 110M", "sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8",
         100, "★★★ Best value (English)",
         "17f945007b52ccd8b7200ffc7c5652e9e8e961dfdf479cefcabd06cf5703630b"),

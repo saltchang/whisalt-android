@@ -20,11 +20,15 @@ class LocalTranscriber private constructor(private val recognizer: OfflineRecogn
     @Synchronized
     fun transcribe(samples: FloatArray, sampleRate: Int = 16000): Transcript {
         check(!released) { "Model was unloaded" }
+        val t0 = System.currentTimeMillis()
         val stream = recognizer.createStream()
         stream.acceptWaveform(samples, sampleRate)
         recognizer.decode(stream)
         val result = recognizer.getResult(stream)
         stream.release()
+        // Token count exposes runaway LLM decoding (Qwen3-ASR) without logging any text
+        Log.i(TAG, "Decoded %.1fs audio in %dms, %d tokens".format(
+            samples.size / sampleRate.toFloat(), System.currentTimeMillis() - t0, result.tokens.size))
         // SenseVoice reports its language as a token such as "<|zh|>"
         val language = result.lang.removePrefix("<|").removeSuffix("|>").ifBlank { null }
         return Transcript(result.text.trim(), language)
@@ -74,6 +78,24 @@ class LocalTranscriber private constructor(private val recognizer: OfflineRecogn
         /** Auto-detect model type from files present in the directory. */
         private fun detectModelConfig(dir: File): OfflineRecognizerConfig? {
             val p = dir.absolutePath
+
+            // Qwen3-ASR (conv_frontend + encoder + decoder, HF tokenizer dir instead of tokens.txt)
+            if (File("$p/conv_frontend.onnx").exists()) {
+                return OfflineRecognizerConfig(
+                    modelConfig = OfflineModelConfig(
+                        qwen3Asr = OfflineQwen3AsrModelConfig(
+                            convFrontend = "$p/conv_frontend.onnx",
+                            encoder = findFile(p, "encoder") ?: return null,
+                            decoder = findFile(p, "decoder") ?: return null,
+                            tokenizer = "$p/tokenizer",
+                        ),
+                        tokens = "",
+                        // Official example uses 3; S23-class phones have 4+ big cores for the LLM decoder
+                        numThreads = 4,
+                    )
+                )
+            }
+
             val tokens = "$p/tokens.txt"
             if (!File(tokens).exists()) return null
 

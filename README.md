@@ -110,7 +110,7 @@ Current catalog:
 
 | Model | Size | Notes |
 |---|---:|---|
-| SenseVoice | 166 MB | Chinese (with English mixed in), plus Japanese, Korean, Cantonese |
+| SenseVoice | 163 MB | Chinese (with English mixed in), plus Japanese, Korean, Cantonese |
 | Parakeet 110M | 100 MB | Best default for English |
 | Whisper Base | 199 MB | Solid baseline |
 | Parakeet 0.6B | 465 MB | Best quality |

@@ -52,7 +52,8 @@ class WhisperAccessibilityService : AccessibilityService() {
 
     private enum class State { IDLE, RECORDING, TRANSCRIBING }
 
-    private var state = State.IDLE
+    // Read by the recording thread, written from the main and transcription threads
+    @Volatile private var state = State.IDLE
     private var overlayView: FrameLayout? = null
     private var button: ImageView? = null
     private var spinner: ProgressBar? = null
@@ -61,6 +62,9 @@ class WhisperAccessibilityService : AccessibilityService() {
     private var feedbackLayoutParams: WindowManager.LayoutParams? = null
     private var audioRecord: AudioRecord? = null
     private var pcmStream: ByteArrayOutputStream? = null
+    private var recordingThread: Thread? = null
+    // Decodes speech while the user is still talking (local mode only)
+    private var segmentedTranscription: SegmentedTranscription? = null
     private val handler = Handler(Looper.getMainLooper())
     private val hideFeedback = Runnable {
         feedbackView?.animate()?.alpha(0f)?.setDuration(180)?.withEndAction {
@@ -327,18 +331,26 @@ class WhisperAccessibilityService : AccessibilityService() {
             )
         } catch (_: SecurityException) { toast("Audio permission denied"); return }
 
-        pcmStream = ByteArrayOutputStream()
+        val local = localTranscriber
+        val session = if (prefs().getBoolean("use_local", true) && local != null)
+            SegmentedTranscription(assets, local) else null
+        val pcm = ByteArrayOutputStream()
+        pcmStream = pcm
+        segmentedTranscription = session
         audioRecord!!.startRecording()
         state = State.RECORDING
         setBusy(false)
         setAppearance(COLOR_RECORDING)
         startPulse()
 
-        thread {
+        recordingThread = thread {
             val buf = ByteArray(bufSize)
             while (state == State.RECORDING) {
                 val n = audioRecord?.read(buf, 0, buf.size) ?: break
-                if (n > 0) pcmStream?.write(buf, 0, n)
+                if (n > 0) {
+                    pcm.write(buf, 0, n)
+                    session?.accept(pcm16ToFloat(buf, n))
+                }
             }
         }
     }
@@ -353,47 +365,46 @@ class WhisperAccessibilityService : AccessibilityService() {
         audioRecord?.release()
         audioRecord = null
 
-        val pcm = pcmStream?.toByteArray() ?: ByteArray(0)
+        val recorder = recordingThread
+        val pcmOut = pcmStream
+        val session = segmentedTranscription
+        recordingThread = null
         pcmStream = null
-
-        if (pcm.isEmpty()) { reset("No audio captured"); return }
+        segmentedTranscription = null
 
         val useLocal = prefs().getBoolean("use_local", true)
-        val local = localTranscriber
-
-        when {
-            !useLocal -> transcribeApi(pcm)
-            local != null -> transcribeLocal(pcm, local)
-            // Never fall back to the cloud when local mode is selected
-            else -> reset("Local model not ready. Download or select one in Whisalt.")
+        thread {
+            // The recording thread may still be appending its last buffer
+            recorder?.join()
+            val pcm = pcmOut?.toByteArray() ?: ByteArray(0)
+            when {
+                pcm.isEmpty() -> { session?.release(); handler.post { reset("No audio captured") } }
+                session != null -> transcribeLocal(pcm, session)
+                !useLocal -> transcribeApi(pcm)
+                // Never fall back to the cloud when local mode is selected
+                else -> handler.post { reset("Local model not ready. Download or select one in Whisalt.") }
+            }
         }
     }
 
-    private fun transcribeLocal(pcm: ByteArray, transcriber: LocalTranscriber) {
-        thread {
-            try {
-                // Convert 16-bit PCM bytes to float samples
-                val samples = FloatArray(pcm.size / 2)
-                for (i in samples.indices) {
-                    val lo = pcm[i * 2].toInt() and 0xFF
-                    val hi = pcm[i * 2 + 1].toInt()
-                    samples[i] = ((hi shl 8) or lo).toShort().toFloat() / 32768f
-                }
+    /** Runs on a background thread. */
+    private fun transcribeLocal(pcm: ByteArray, session: SegmentedTranscription) {
+        try {
+            val t0 = System.currentTimeMillis()
+            // Most segments were decoded while recording; VAD hearing no speech means decode it all
+            val transcript = session.finish()
+                ?: localTranscriber?.transcribe(pcm16ToFloat(pcm, pcm.size), SAMPLE_RATE)
+                ?: throw IllegalStateException("Local model not ready")
+            Log.i(TAG, "Local transcription: ${System.currentTimeMillis() - t0}ms after stop, ${pcm.size / 2 / SAMPLE_RATE}s audio")
 
-                val t0 = System.currentTimeMillis()
-                val transcript = transcriber.transcribe(samples, SAMPLE_RATE)
-                val ms = System.currentTimeMillis() - t0
-                Log.i(TAG, "Local transcription: ${ms}ms, ${samples.size / SAMPLE_RATE}s audio")
-
-                handleTranscriptionResult(transcript.text, transcript.language)
-            } catch (e: Exception) {
-                Log.e(TAG, "Local transcription failed", e)
-                handler.post {
-                    toast("Local error: ${e.message}")
-                    state = State.IDLE
-                    setBusy(false)
-                    setAppearance(COLOR_IDLE)
-                }
+            handleTranscriptionResult(transcript.text, transcript.language)
+        } catch (e: Exception) {
+            Log.e(TAG, "Local transcription failed", e)
+            handler.post {
+                toast("Local error: ${e.message}")
+                state = State.IDLE
+                setBusy(false)
+                setAppearance(COLOR_IDLE)
             }
         }
     }
@@ -649,6 +660,11 @@ class WhisperAccessibilityService : AccessibilityService() {
             TAG,
             "$prefix package=${node.packageName} class=${node.className} focused=${node.isFocused} editable=${node.isEditable} actions=[$actions]"
         )
+    }
+
+    /** Little-endian 16-bit PCM to floats in [-1, 1). */
+    private fun pcm16ToFloat(bytes: ByteArray, length: Int) = FloatArray(length / 2) { i ->
+        ((bytes[i * 2 + 1].toInt() shl 8) or (bytes[i * 2].toInt() and 0xFF)).toShort() / 32768f
     }
 
     private fun prefs() = getSharedPreferences("whisalt", MODE_PRIVATE)
