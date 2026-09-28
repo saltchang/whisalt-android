@@ -6,11 +6,11 @@
 
 Push-to-talk dictation for Android.
 
-Whisalt lets you speak into most apps without switching keyboards. Tap the floating button, speak, tap again, and your text is inserted into the currently focused text field when the app exposes a standard Android input field.\
+Whisalt lets you speak into most apps without switching keyboards. Tap the floating button, speak, tap the check mark, and your text is inserted into the currently focused text field when the app exposes a standard Android input field.\
 
 It supports:
 
-- **Local on-device transcription** with sherpa-onnx
+- **Local on-device transcription** with sherpa-onnx or whisper.cpp
 - **Cloud transcription** with OpenAI Whisper
 - **Optional cleanup** with OpenAI to fix punctuation and grammar
 
@@ -35,14 +35,17 @@ Open it on your phone, install it, then launch the app once to finish setup.
 
 ### Build from source
 
-Requires a JDK (17-27) and the Android SDK (platform 37, build-tools 36).
+Requires a JDK (17-27) and the Android SDK (platform 37, build-tools 36, NDK 30.0.16248370, CMake 4.1.2).
 
 ```bash
 git clone https://github.com/saltchang/whisalt-android.git && cd whisalt-android
 make build
 ```
 
-`make build` first runs `make deps`, which downloads the official [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) AAR (Kotlin API + native libraries) into `app/libs/` and verifies its SHA-256.
+`make build` first runs `make deps`, which downloads and verifies (SHA-256):
+
+- the official [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) AAR (Kotlin API + native libraries) into `app/libs/`
+- the [whisper.cpp](https://github.com/ggml-org/whisper.cpp) source into `app/whisper.cpp/`, which the build compiles with the NDK
 
 `make` uses `ANDROID_HOME` from your environment, defaulting to `~/Android/Sdk` on Linux and `~/Library/Android/sdk` on macOS.
 
@@ -61,9 +64,9 @@ make adb-install
 ## How it works
 
 1. A small overlay button floats on screen
-2. Tap once to start recording
-3. Tap again to stop
-4. Audio is transcribed locally or in the cloud
+2. Tap it to start recording; it expands into cancel, a level meter and done
+3. Tap done to transcribe, or cancel to drop the recording
+4. Audio is transcribed locally or in the cloud. In local mode, speech is decoded at each pause while you are still talking, and a recording without speech is skipped
 5. The text is inserted into the focused text field
 6. If insertion fails, the text is copied to the clipboard
 
@@ -110,13 +113,17 @@ Current catalog:
 
 | Model | Size | Notes |
 |---|---:|---|
-| SenseVoice | 163 MB | Chinese (with English mixed in), plus Japanese, Korean, Cantonese |
+| SenseVoice | 163 MB | Chinese (with English mixed in), plus Japanese, Korean, Cantonese; fastest for Chinese |
+| Qwen3-ASR 0.6B | 879 MB | Most accurate for Chinese mixed with English; supports the vocabulary list |
+| Whisper Turbo | 874 MB | Whisper large-v3-turbo (q8_0) via whisper.cpp, same model as OpenWhispr; slowest |
 | Parakeet 110M | 100 MB | Best default for English |
 | Whisper Base | 199 MB | Solid baseline |
 | Parakeet 0.6B | 465 MB | Best quality |
 | Moonshine Tiny | 103 MB | Fastest |
 
-The app downloads and extracts models directly from the sherpa-onnx release archives.
+The app downloads models directly from the sherpa-onnx release archives (Whisper Turbo from [Hugging Face](https://huggingface.co/ggerganov/whisper.cpp)) and verifies their SHA-256.
+
+The **Vocabulary** section in the app takes words you use often (passed to Qwen3-ASR and Whisper as hints) and `wrong => right` replacement rules applied to every transcript.
 
 Chinese transcripts are converted to Traditional Chinese with Taiwan phrasing (软件 → 軟體, 网络 → 網路), using the same OpenCC `s2twp` conversion as [OpenWhispr](https://github.com/OpenWhispr/openwhispr). The dictionaries in `app/src/main/assets/opencc/` come from [opencc-js](https://github.com/nk2028/opencc-js) 1.4.1 (MIT) and [OpenCC](https://github.com/BYVoid/OpenCC) (Apache License 2.0).
 
@@ -158,4 +165,4 @@ Once text is inserted into the native input box, Termux sends it to the terminal
 
 ## License
 
-Licensed under the [Apache License 2.0](LICENSE). Based on [Phone Whisper](https://github.com/kafkasl/phone-whisper) by Pol Alvarez; uses [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache License 2.0).
+Licensed under the [Apache License 2.0](LICENSE). Based on [Phone Whisper](https://github.com/kafkasl/phone-whisper) by Pol Alvarez; uses [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache License 2.0) and [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT).
