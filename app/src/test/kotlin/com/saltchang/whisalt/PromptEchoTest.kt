@@ -28,6 +28,8 @@ class PromptEchoTest {
         assertEquals("我的記憶體不夠，要買硬碟。", PromptEcho.clean("我的記憶體不夠，要買硬碟。", dictionary, prompt))
         // A lone vocabulary word covers only part of the list
         assertEquals("硬碟", PromptEcho.clean("硬碟", dictionary, prompt))
+        // Saying the only vocabulary word is not an echo either
+        assertEquals("硬碟。", PromptEcho.clean("硬碟。", "硬碟", WhisperCppTranscriber.prompt("硬碟")))
     }
 
     @Test fun `trailing loop after real speech is cut`() {

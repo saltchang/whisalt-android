@@ -13,15 +13,14 @@ object PromptEcho {
      * OpenWhispr's `isDictionaryEcho` (90%+ of the output's terms are prompt terms, covering 70%+ of
      * the prompt), plus: two or more distinct terms that all come from the prompt, which catches
      * echoing just the script prompt's list. Real speech using a vocabulary word is kept, since it
-     * brings words of its own.
+     * brings words of its own, and so is a lone term: it may be exactly what the user said.
      */
     fun isEcho(output: String, prompt: String): Boolean {
         val outTerms = terms(output).toSet()
         val promptTerms = terms(prompt).toSet()
-        if (outTerms.isEmpty() || promptTerms.isEmpty()) return false
-        if (outTerms == promptTerms) return true
+        if (outTerms.size < 2 || promptTerms.isEmpty()) return false
         val shared = outTerms.count { it in promptTerms }
-        if (shared == outTerms.size && shared >= 2) return true
+        if (shared == outTerms.size) return true
         return shared.toDouble() / outTerms.size >= 0.9 && shared.toDouble() / promptTerms.size >= 0.7
     }
 
