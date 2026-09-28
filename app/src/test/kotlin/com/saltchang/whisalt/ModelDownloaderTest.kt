@@ -92,11 +92,15 @@ class ModelDownloaderTest {
     }
 
     @Test fun `catalog has expected structure`() {
-        assertEquals(6, MODEL_CATALOG.size)
+        assertEquals(7, MODEL_CATALOG.size)
         assertTrue(MODEL_CATALOG.any { it.recommended })
-        assertTrue(MODEL_CATALOG.all { it.archive.startsWith("sherpa-onnx-") })
         assertTrue(MODEL_CATALOG.all { it.sizeMb > 0 })
-        assertTrue(MODEL_CATALOG.all { it.sha256.matches(Regex("[0-9a-f]{64}")) })
+        // Every download is pinned: the release archive, or each direct file
+        val sha = Regex("[0-9a-f]{64}")
+        assertTrue(MODEL_CATALOG.all { m ->
+            if (m.files.isEmpty()) m.sha256.matches(sha) && m.archive.startsWith("sherpa-onnx-")
+            else m.files.all { it.sha256.matches(sha) && it.url.startsWith("https://") }
+        })
     }
 
     // -- helpers --

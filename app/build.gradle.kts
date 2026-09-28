@@ -5,6 +5,7 @@ plugins {
 android {
     namespace = "com.saltchang.whisalt"
     compileSdk = 37
+    ndkVersion = "30.0.16248370"
 
     defaultConfig {
         applicationId = "com.saltchang.whisalt"
@@ -14,6 +15,21 @@ android {
         versionName = "0.3.0"
 
         ndk { abiFilters += "arm64-v8a" }
+        externalNativeBuild {
+            cmake {
+                // whisper.cpp at -O0 (AGP's default for debug builds) is several times slower
+                arguments += listOf("-DANDROID_STL=c++_shared", "-DCMAKE_BUILD_TYPE=Release")
+                // Our JNI lib, plus the ggml CPU variants it dlopen()s at runtime (nothing links them,
+                // so they must be listed): baseline, dotprod+fp16 (most 2019+ SoCs) and i8mm
+                // (Snapdragon 8 Gen 1 and newer). The other variants need SVE, which Snapdragons don't expose.
+                targets += listOf(
+                    "whisper_jni",
+                    "ggml-cpu-android_armv8.0_1",
+                    "ggml-cpu-android_armv8.2_2",
+                    "ggml-cpu-android_armv8.6_1",
+                )
+            }
+        }
     }
 
     compileOptions {
@@ -22,6 +38,18 @@ android {
     }
 
     testOptions { unitTests { isIncludeAndroidResources = true } }
+
+    // whisper.cpp; its source is fetched by `make deps`
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "4.1.2"
+        }
+    }
+
+    // ggml dlopen()s its CPU variants (libggml-cpu-*.so) by scanning nativeLibraryDir, so native
+    // libraries must be extracted to disk rather than read straight from the APK
+    packaging { jniLibs { useLegacyPackaging = true } }
 }
 
 dependencies {

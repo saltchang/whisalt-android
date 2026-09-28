@@ -6,10 +6,10 @@ import com.k2fsa.sherpa.onnx.*
 import java.io.File
 
 /**
- * Local on-device transcription via sherpa-onnx.
- * Models are loaded from the app's external files dir.
+ * On-device speech recognition engine: sherpa-onnx ([SherpaTranscriber]) or whisper.cpp
+ * ([WhisperCppTranscriber]). Serializes decodes and keeps the model alive while a recording uses it.
  */
-class LocalTranscriber private constructor(private val recognizer: OfflineRecognizer) {
+abstract class LocalTranscriber {
 
     private var released = false
     private var users = 0
@@ -33,25 +33,24 @@ class LocalTranscriber private constructor(private val recognizer: OfflineRecogn
     /** [language] is the recognizer's detected language ("zh", "ja", ...), or null if it reports none. */
     data class Transcript(val text: String, val language: String?)
 
-    /** Transcribe raw PCM float samples. Blocking — call from background thread. */
+    /**
+     * Transcribe raw PCM float samples. Blocking — call from background thread.
+     * [hotwords] is a comma-separated vocabulary; see [Vocabulary.hotwords].
+     */
     @Synchronized
     fun transcribe(samples: FloatArray, sampleRate: Int = 16000, hotwords: String = ""): Transcript {
         check(!released) { "Model was unloaded" }
         val t0 = System.currentTimeMillis()
-        val stream = recognizer.createStream()
-        // Only Qwen3-ASR reads this option; other models ignore it
-        if (hotwords.isNotEmpty()) stream.setOption("hotwords", hotwords)
-        stream.acceptWaveform(samples, sampleRate)
-        recognizer.decode(stream)
-        val result = recognizer.getResult(stream)
-        stream.release()
-        // Token count exposes runaway LLM decoding (Qwen3-ASR) without logging any text
-        Log.i(TAG, "Decoded %.1fs audio in %dms, %d tokens".format(
-            samples.size / sampleRate.toFloat(), System.currentTimeMillis() - t0, result.tokens.size))
-        // SenseVoice reports its language as a token such as "<|zh|>"
-        val language = result.lang.removePrefix("<|").removeSuffix("|>").ifBlank { null }
-        return Transcript(result.text.trim(), language)
+        val transcript = decode(samples, sampleRate, hotwords)
+        // Output length exposes runaway decoding without logging any text
+        Log.i(TAG, "Decoded %.1fs audio in %dms, %d chars".format(
+            samples.size / sampleRate.toFloat(), System.currentTimeMillis() - t0, transcript.text.length))
+        return transcript
     }
+
+    protected abstract fun decode(samples: FloatArray, sampleRate: Int, hotwords: String): Transcript
+
+    protected abstract fun freeNative()
 
     /** Frees native memory once no recording is using the model. Waits for an in-flight decode. */
     @Synchronized
@@ -63,7 +62,7 @@ class LocalTranscriber private constructor(private val recognizer: OfflineRecogn
     private fun free() {
         if (released) return
         released = true
-        recognizer.release()
+        freeNative()
     }
 
     companion object {
@@ -84,6 +83,11 @@ class LocalTranscriber private constructor(private val recognizer: OfflineRecogn
                 return null
             }
 
+            // whisper.cpp models are a single ggml .bin file
+            modelDir.listFiles()?.firstOrNull { it.name.startsWith("ggml-") && it.name.endsWith(".bin") }?.let {
+                return WhisperCppTranscriber.create(ctx, it)?.also { Log.i(TAG, "Loaded model: $modelName") }
+            }
+
             val config = detectModelConfig(modelDir) ?: run {
                 Log.e(TAG, "Could not detect model type in $modelDir")
                 return null
@@ -92,7 +96,7 @@ class LocalTranscriber private constructor(private val recognizer: OfflineRecogn
             return try {
                 val recognizer = OfflineRecognizer(assetManager = null, config = config)
                 Log.i(TAG, "Loaded model: $modelName")
-                LocalTranscriber(recognizer)
+                SherpaTranscriber(recognizer)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to load model: ${e.message}")
                 null
@@ -217,4 +221,21 @@ class LocalTranscriber private constructor(private val recognizer: OfflineRecogn
             }?.absolutePath
         }
     }
+}
+
+private class SherpaTranscriber(private val recognizer: OfflineRecognizer) : LocalTranscriber() {
+    override fun decode(samples: FloatArray, sampleRate: Int, hotwords: String): Transcript {
+        val stream = recognizer.createStream()
+        // Only Qwen3-ASR reads this option; other models ignore it
+        if (hotwords.isNotEmpty()) stream.setOption("hotwords", hotwords)
+        stream.acceptWaveform(samples, sampleRate)
+        recognizer.decode(stream)
+        val result = recognizer.getResult(stream)
+        stream.release()
+        // SenseVoice reports its language as a token such as "<|zh|>"
+        val language = result.lang.removePrefix("<|").removeSuffix("|>").ifBlank { null }
+        return Transcript(result.text.trim(), language)
+    }
+
+    override fun freeNative() = recognizer.release()
 }

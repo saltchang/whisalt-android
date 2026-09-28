@@ -9,13 +9,19 @@ import java.io.*
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
+/** One file of a model, saved as [path] inside the model directory. */
+data class RemoteFile(val url: String, val sha256: String, val path: String = url.substringAfterLast('/'))
+
 data class Model(
     val name: String,
+    /** Model directory name; also the sherpa-onnx release archive name */
     val archive: String,
     val sizeMb: Int,
     val quality: String,
-    /** SHA-256 of the .tar.bz2 release asset */
-    val sha256: String,
+    /** SHA-256 of the .tar.bz2 release asset; unused when [files] is set */
+    val sha256: String = "",
+    /** Download these files directly instead of the sherpa-onnx release archive */
+    val files: List<RemoteFile> = emptyList(),
     val recommended: Boolean = false,
 )
 
@@ -28,6 +34,12 @@ val MODEL_CATALOG = listOf(
     Model("Qwen3-ASR 0.6B (中文)", "sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25",
         879, "★★★★★ 中英夾雜最強・較慢",
         "393f8a14e2f5fb96746aaab342997a40641001fbd5bf9592a080a8329178ee96"),
+    Model("Whisper Turbo (中文)", "whisper-large-v3-turbo-q8_0",
+        874, "★★★★★ 同 OpenWhispr・最慢",
+        files = listOf(RemoteFile(
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin",
+            "317eb69c11673c9de1e1f0d459b253999804ec71ac4c23c17ecf5fbe24e259a1",
+        ))),
     Model("Parakeet 110M", "sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8",
         100, "★★★ Best value (English)",
         "17f945007b52ccd8b7200ffc7c5652e9e8e961dfdf479cefcabd06cf5703630b"),
@@ -71,12 +83,20 @@ object ModelDownloader {
 
         Thread {
             try {
-                downloadFile(url, tmpFile, onState)
-                verifySha256(tmpFile, model.sha256)
-                onState(DownloadState.Extracting)
                 stagingDir.deleteRecursively()
-                extractTarBz2(tmpFile, stagingDir)
                 val extracted = File(stagingDir, model.archive)
+                if (model.files.isEmpty()) {
+                    downloadFile(url, tmpFile, onState)
+                    verifySha256(tmpFile, model.sha256)
+                    onState(DownloadState.Extracting)
+                    extractTarBz2(tmpFile, stagingDir)
+                } else {
+                    for (file in model.files) {
+                        val dest = File(extracted, file.path).apply { parentFile?.mkdirs() }
+                        downloadFile(file.url, dest, onState)
+                        verifySha256(dest, file.sha256)
+                    }
+                }
                 if (!extracted.isDirectory) throw IOException("Unexpected archive layout")
                 val dest = modelDir(ctx, model)
                 dest.parentFile?.mkdirs()
