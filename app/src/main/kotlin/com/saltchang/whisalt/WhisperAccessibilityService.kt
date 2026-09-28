@@ -393,10 +393,8 @@ class WhisperAccessibilityService : AccessibilityService() {
     private fun transcribeLocal(pcm: ByteArray, session: SegmentedTranscription) {
         try {
             val t0 = System.currentTimeMillis()
-            // Most segments were decoded while recording; VAD hearing no speech means decode it all
-            val transcript = session.finish()
-                ?: localTranscriber?.transcribe(pcm16ToFloat(pcm, pcm.size), SAMPLE_RATE, session.hotwords)
-                ?: throw IllegalStateException("Local model not ready")
+            // Most segments were decoded while recording; only the tail (or, without speech, all) remains
+            val transcript = session.finish { pcm16ToFloat(pcm, pcm.size) }
             Log.i(TAG, "Local transcription: ${System.currentTimeMillis() - t0}ms after stop, ${pcm.size / 2 / SAMPLE_RATE}s audio")
 
             handleTranscriptionResult(transcript.text, transcript.language)

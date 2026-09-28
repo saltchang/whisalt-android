@@ -19,7 +19,7 @@ class SegmentedTranscription(
     assets: AssetManager,
     private val transcriber: LocalTranscriber,
     /** Comma-separated vocabulary passed to every segment; see [Vocabulary.hotwords]. */
-    val hotwords: String,
+    private val hotwords: String,
 ) {
     private val vad = Vad(
         assets,
@@ -51,14 +51,16 @@ class SegmentedTranscription(
     }
 
     /**
-     * Waits for every segment; null if VAD heard no speech at all. Releases native resources and
-     * the use on [transcriber] that the caller took with [LocalTranscriber.acquire].
+     * Waits for every segment. If VAD heard no speech at all, decodes [fullAudio] instead, still with
+     * this recording's model. Then releases native resources and the use on [transcriber] that the
+     * caller took with [LocalTranscriber.acquire].
      */
-    fun finish(): LocalTranscriber.Transcript? = try {
+    fun finish(fullAudio: () -> FloatArray): LocalTranscriber.Transcript = try {
         if (filled > 0) vad.acceptWaveform(window.copyOf(filled))
         vad.flush()
         submitFinishedSegments()
-        if (segments.isEmpty()) null else merge(segments.map { it.get() })
+        if (segments.isEmpty()) transcriber.transcribe(fullAudio(), hotwords = hotwords)
+        else merge(segments.map { it.get() })
     } finally {
         release()
     }
