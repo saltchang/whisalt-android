@@ -18,10 +18,12 @@ class LocalTranscriber private constructor(private val recognizer: OfflineRecogn
 
     /** Transcribe raw PCM float samples. Blocking — call from background thread. */
     @Synchronized
-    fun transcribe(samples: FloatArray, sampleRate: Int = 16000): Transcript {
+    fun transcribe(samples: FloatArray, sampleRate: Int = 16000, hotwords: String = ""): Transcript {
         check(!released) { "Model was unloaded" }
         val t0 = System.currentTimeMillis()
         val stream = recognizer.createStream()
+        // Only Qwen3-ASR reads this option; other models ignore it
+        if (hotwords.isNotEmpty()) stream.setOption("hotwords", hotwords)
         stream.acceptWaveform(samples, sampleRate)
         recognizer.decode(stream)
         val result = recognizer.getResult(stream)

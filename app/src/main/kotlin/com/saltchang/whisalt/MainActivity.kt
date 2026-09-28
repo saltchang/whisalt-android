@@ -17,6 +17,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
@@ -35,6 +36,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var promptRow: LinearLayout
     private lateinit var modelContainer: LinearLayout
     private lateinit var promptContainer: LinearLayout
+    private lateinit var hotwordsRowSub: TextView
+    private lateinit var replacementsRowSub: TextView
 
     private val modelRows = mutableMapOf<String, ModelRowViews>()
     private val promptRows = mutableMapOf<String, PromptRowViews>()
@@ -108,6 +111,25 @@ class MainActivity : AppCompatActivity() {
         modelContainer.addView(sectionHeader("Local models"))
         for (m in MODEL_CATALOG) modelContainer.addView(buildModelRow(m))
         root.addView(modelContainer)
+
+        // --- Vocabulary Section ---
+        root.addView(sectionHeader("Vocabulary"))
+        val hotwordsRow = settingsRow("Words to recognize", "") {
+            editVocabulary(
+                Vocabulary.HOTWORDS_PREF, "Words to recognize",
+                "One per line. Qwen3-ASR favors these spellings.\nWhisalt\nKubernetes\n鍾鹽",
+            )
+        }
+        hotwordsRowSub = hotwordsRow.findViewWithTag("subtitle")
+        root.addView(hotwordsRow)
+        val replacementsRow = settingsRow("Replacements", "") {
+            editVocabulary(
+                Vocabulary.REPLACEMENTS_PREF, "Replacements",
+                "One rule per line: wrong => right\n瑞艾克特 => React\n在嗎 => 在嗎？",
+            )
+        }
+        replacementsRowSub = replacementsRow.findViewWithTag("subtitle")
+        root.addView(replacementsRow)
 
         // --- Post-Processing Section ---
         root.addView(sectionHeader("Post-Processing"))
@@ -339,6 +361,9 @@ class MainActivity : AppCompatActivity() {
         val prompt = currentPrompt()
         promptRowSub.text = prompt
 
+        hotwordsRowSub.text = vocabularySummary(Vocabulary.HOTWORDS_PREF, "word")
+        replacementsRowSub.text = vocabularySummary(Vocabulary.REPLACEMENTS_PREF, "rule")
+
         val cur = prefs().getString("model_name", "") ?: ""
         if (cur.isBlank() || !File(filesDir, "models/$cur").exists()) {
             MODEL_CATALOG.firstOrNull { ModelDownloader.isInstalled(this, it) }
@@ -368,6 +393,25 @@ class MainActivity : AppCompatActivity() {
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
                 ApiKeyStore.set(this, input.text.toString().trim())
+                refresh()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun editVocabulary(pref: String, title: String, hint: String) {
+        val input = EditText(this).apply {
+            this.hint = hint
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 4
+            gravity = Gravity.TOP or Gravity.START
+            setText(prefs().getString(pref, ""))
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
+            .setPositiveButton("Save") { _, _ ->
+                prefs().edit { putString(pref, input.text.toString().trim()) }
                 refresh()
             }
             .setNegativeButton("Cancel", null)
@@ -483,6 +527,11 @@ class MainActivity : AppCompatActivity() {
             prompt = customPrompt()
         )
     )
+
+    private fun vocabularySummary(pref: String, noun: String): String {
+        val n = Vocabulary.count(prefs().getString(pref, "") ?: "")
+        return if (n == 0) "Tap to add" else "$n $noun${if (n == 1) "" else "s"}"
+    }
 
     private fun dp(n: Int) = (n * resources.displayMetrics.density).toInt()
     private fun hasPerm(p: String) = ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED

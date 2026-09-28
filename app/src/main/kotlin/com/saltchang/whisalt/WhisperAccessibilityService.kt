@@ -333,7 +333,8 @@ class WhisperAccessibilityService : AccessibilityService() {
 
         val local = localTranscriber
         val session = if (prefs().getBoolean("use_local", true) && local != null)
-            SegmentedTranscription(assets, local) else null
+            SegmentedTranscription(assets, local, Vocabulary.hotwords(prefs().getString(Vocabulary.HOTWORDS_PREF, "") ?: ""))
+        else null
         val pcm = ByteArrayOutputStream()
         pcmStream = pcm
         segmentedTranscription = session
@@ -393,7 +394,7 @@ class WhisperAccessibilityService : AccessibilityService() {
             val t0 = System.currentTimeMillis()
             // Most segments were decoded while recording; VAD hearing no speech means decode it all
             val transcript = session.finish()
-                ?: localTranscriber?.transcribe(pcm16ToFloat(pcm, pcm.size), SAMPLE_RATE)
+                ?: localTranscriber?.transcribe(pcm16ToFloat(pcm, pcm.size), SAMPLE_RATE, session.hotwords)
                 ?: throw IllegalStateException("Local model not ready")
             Log.i(TAG, "Local transcription: ${System.currentTimeMillis() - t0}ms after stop, ${pcm.size / 2 / SAMPLE_RATE}s audio")
 
@@ -432,6 +433,12 @@ class WhisperAccessibilityService : AccessibilityService() {
     private fun toTaiwanTraditional(text: String, language: String?) =
         if (ChineseConverter.isChinese(text, language)) chineseConverter.toTaiwan(text) else text
 
+    /** Taiwan Traditional first, then the user's `wrong => right` rules, which they write in Traditional. */
+    private fun finalizeText(text: String, language: String?): String {
+        val rules = Vocabulary.replacements(prefs().getString(Vocabulary.REPLACEMENTS_PREF, "") ?: "")
+        return Vocabulary.applyReplacements(toTaiwanTraditional(text, language), rules)
+    }
+
     private fun handleTranscriptionResult(rawText: String?, language: String?) {
         if (rawText.isNullOrBlank()) {
             handler.post {
@@ -442,7 +449,7 @@ class WhisperAccessibilityService : AccessibilityService() {
             }
             return
         }
-        val text = toTaiwanTraditional(rawText, language)
+        val text = finalizeText(rawText, language)
 
         val usePostProcessing = prefs().getBoolean("use_post_processing", false)
         val apiKey = ApiKeyStore.get(this)
@@ -462,7 +469,7 @@ class WhisperAccessibilityService : AccessibilityService() {
             val prompt = prefs().getString("post_processing_prompt", PostProcessor.DEFAULT_PROMPT) ?: PostProcessor.DEFAULT_PROMPT
             
             PostProcessor.process(text, prompt, apiKey) { result ->
-                val cleaned = result.text?.takeIf { it.isNotBlank() }?.let { toTaiwanTraditional(it, language) }
+                val cleaned = result.text?.takeIf { it.isNotBlank() }?.let { finalizeText(it, language) }
                 handler.post {
                     if (cleaned != null) {
                         injectText(cleaned)

@@ -15,7 +15,12 @@ import java.util.concurrent.Future
  *
  * [accept] runs on the recording thread; [finish] runs once, after that thread has been joined.
  */
-class SegmentedTranscription(assets: AssetManager, private val transcriber: LocalTranscriber) {
+class SegmentedTranscription(
+    assets: AssetManager,
+    private val transcriber: LocalTranscriber,
+    /** Comma-separated vocabulary passed to every segment; see [Vocabulary.hotwords]. */
+    val hotwords: String,
+) {
     private val vad = Vad(
         assets,
         VadModelConfig(
@@ -64,7 +69,7 @@ class SegmentedTranscription(assets: AssetManager, private val transcriber: Loca
         while (!vad.empty()) {
             val samples = vad.front().samples
             vad.pop()
-            segments += worker.submit(Callable { transcriber.transcribe(samples) })
+            segments += worker.submit(Callable { transcriber.transcribe(samples, hotwords = hotwords) })
         }
     }
 
