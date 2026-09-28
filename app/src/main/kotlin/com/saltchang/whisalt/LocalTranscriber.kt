@@ -13,16 +13,21 @@ class LocalTranscriber private constructor(private val recognizer: OfflineRecogn
 
     private var released = false
 
+    /** [language] is the recognizer's detected language ("zh", "ja", ...), or null if it reports none. */
+    data class Transcript(val text: String, val language: String?)
+
     /** Transcribe raw PCM float samples. Blocking — call from background thread. */
     @Synchronized
-    fun transcribe(samples: FloatArray, sampleRate: Int = 16000): String {
+    fun transcribe(samples: FloatArray, sampleRate: Int = 16000): Transcript {
         check(!released) { "Model was unloaded" }
         val stream = recognizer.createStream()
         stream.acceptWaveform(samples, sampleRate)
         recognizer.decode(stream)
         val result = recognizer.getResult(stream)
         stream.release()
-        return result.text.trim()
+        // SenseVoice reports its language as a token such as "<|zh|>"
+        val language = result.lang.removePrefix("<|").removeSuffix("|>").ifBlank { null }
+        return Transcript(result.text.trim(), language)
     }
 
     /** Free native memory. Waits for any in-flight transcription to finish. */

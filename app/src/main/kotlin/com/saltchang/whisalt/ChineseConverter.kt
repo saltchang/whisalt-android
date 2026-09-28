@@ -74,8 +74,16 @@ class ChineseConverter(private val open: (String) -> InputStream) {
         private val KANA_OR_HANGUL =
             Regex("[\\u3040-\\u30ff\\u31f0-\\u31ff\\uff66-\\uff9f\\u1100-\\u11ff\\u3130-\\u318f\\uac00-\\ud7af]")
 
-        /** Chinese text only: Japanese and Korean output (SenseVoice can emit both) is left alone. */
-        fun isChinese(text: String) = HAN.containsMatchIn(text) && !KANA_OR_HANGUL.containsMatchIn(text)
+        /**
+         * Whether [text] should be converted. Trusts the recognizer's [language] (e.g. SenseVoice's
+         * "zh"/"ja") when known, so kanji-only Japanese is skipped and Chinese with a stray kana is not;
+         * without it, falls back to skipping any text that contains kana or hangul.
+         */
+        fun isChinese(text: String, language: String? = null): Boolean = when (language) {
+            "ja", "ko" -> false
+            null -> HAN.containsMatchIn(text) && !KANA_OR_HANGUL.containsMatchIn(text)
+            else -> HAN.containsMatchIn(text)
+        }
 
         private fun load(input: InputStream): Map<String, String> = HashMap<String, String>().apply {
             input.bufferedReader().useLines { lines ->

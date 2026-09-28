@@ -381,11 +381,11 @@ class WhisperAccessibilityService : AccessibilityService() {
                 }
 
                 val t0 = System.currentTimeMillis()
-                val text = transcriber.transcribe(samples, SAMPLE_RATE)
+                val transcript = transcriber.transcribe(samples, SAMPLE_RATE)
                 val ms = System.currentTimeMillis() - t0
                 Log.i(TAG, "Local transcription: ${ms}ms, ${samples.size / SAMPLE_RATE}s audio")
 
-                handleTranscriptionResult(text)
+                handleTranscriptionResult(transcript.text, transcript.language)
             } catch (e: Exception) {
                 Log.e(TAG, "Local transcription failed", e)
                 handler.post {
@@ -405,7 +405,7 @@ class WhisperAccessibilityService : AccessibilityService() {
 
         TranscriberClient.transcribe(wav, apiKey) { result ->
             if (result.text != null && result.text.isNotBlank()) {
-                handleTranscriptionResult(result.text)
+                handleTranscriptionResult(result.text, language = null)
             } else {
                 handler.post {
                     toast("Error: ${result.error ?: "empty transcript"}")
@@ -418,10 +418,10 @@ class WhisperAccessibilityService : AccessibilityService() {
     }
 
     /** Chinese output is shown in Taiwan Traditional; other languages pass through. Call off the main thread. */
-    private fun toTaiwanTraditional(text: String) =
-        if (ChineseConverter.isChinese(text)) chineseConverter.toTaiwan(text) else text
+    private fun toTaiwanTraditional(text: String, language: String?) =
+        if (ChineseConverter.isChinese(text, language)) chineseConverter.toTaiwan(text) else text
 
-    private fun handleTranscriptionResult(rawText: String?) {
+    private fun handleTranscriptionResult(rawText: String?, language: String?) {
         if (rawText.isNullOrBlank()) {
             handler.post {
                 toast("No speech detected")
@@ -431,7 +431,7 @@ class WhisperAccessibilityService : AccessibilityService() {
             }
             return
         }
-        val text = toTaiwanTraditional(rawText)
+        val text = toTaiwanTraditional(rawText, language)
 
         val usePostProcessing = prefs().getBoolean("use_post_processing", false)
         val apiKey = ApiKeyStore.get(this)
@@ -451,7 +451,7 @@ class WhisperAccessibilityService : AccessibilityService() {
             val prompt = prefs().getString("post_processing_prompt", PostProcessor.DEFAULT_PROMPT) ?: PostProcessor.DEFAULT_PROMPT
             
             PostProcessor.process(text, prompt, apiKey) { result ->
-                val cleaned = result.text?.takeIf { it.isNotBlank() }?.let(::toTaiwanTraditional)
+                val cleaned = result.text?.takeIf { it.isNotBlank() }?.let { toTaiwanTraditional(it, language) }
                 handler.post {
                     if (cleaned != null) {
                         injectText(cleaned)

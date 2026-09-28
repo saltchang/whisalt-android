@@ -55,6 +55,14 @@ class ChineseConverterTest {
         assertEquals("👍這個", converter.toTaiwan("👍这个"))
     }
 
+    @Test fun `trusts the recognizer language when it reports one`() {
+        assertTrue(ChineseConverter.isChinese("这个软件は", language = "zh"))
+        assertFalse(ChineseConverter.isChinese("写真", language = "ja"))
+        assertFalse(ChineseConverter.isChinese("사진", language = "ko"))
+        assertTrue(ChineseConverter.isChinese("幫我 review 这个", language = "en"))
+        assertFalse(ChineseConverter.isChinese("hello", language = "en"))
+    }
+
     @Test fun `detects Chinese but not Japanese or Korean`() {
         assertTrue(ChineseConverter.isChinese("这个软件"))
         assertTrue(ChineseConverter.isChinese("幫我 review 這個 PR"))
