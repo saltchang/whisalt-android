@@ -90,21 +90,21 @@ object ModelDownloader {
     private fun downloadFile(
         url: String, dest: File, onState: (DownloadState) -> Unit
     ) {
-        val response = client.newCall(Request.Builder().url(url).build()).execute()
-        if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
-        val body = response.body ?: throw IOException("Empty response")
-        val total = body.contentLength()
-        var downloaded = 0L
+        client.newCall(Request.Builder().url(url).build()).execute().use { response ->
+            if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
+            val total = response.body.contentLength()
+            var downloaded = 0L
 
-        body.byteStream().use { src ->
-            FileOutputStream(dest).use { dst ->
-                val buf = ByteArray(16384)
-                var n: Int
-                while (src.read(buf).also { n = it } != -1) {
-                    dst.write(buf, 0, n)
-                    downloaded += n
-                    if (total > 0)
-                        onState(DownloadState.Downloading(downloaded.toFloat() / total))
+            response.body.byteStream().use { src ->
+                FileOutputStream(dest).use { dst ->
+                    val buf = ByteArray(16384)
+                    var n: Int
+                    while (src.read(buf).also { n = it } != -1) {
+                        dst.write(buf, 0, n)
+                        downloaded += n
+                        if (total > 0)
+                            onState(DownloadState.Downloading(downloaded.toFloat() / total))
+                    }
                 }
             }
         }
@@ -112,11 +112,7 @@ object ModelDownloader {
 
     fun verifySha256(file: File, expected: String) {
         val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buf = ByteArray(65536)
-            var n: Int
-            while (input.read(buf).also { n = it } != -1) digest.update(buf, 0, n)
-        }
+        file.forEachBlock { buf, n -> digest.update(buf, 0, n) }
         val actual = digest.digest().joinToString("") { "%02x".format(it) }
         if (!actual.equals(expected, ignoreCase = true)) throw IOException("Checksum mismatch")
     }

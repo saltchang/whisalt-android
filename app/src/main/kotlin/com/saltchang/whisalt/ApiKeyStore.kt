@@ -5,6 +5,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
+import androidx.core.content.edit
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -35,13 +36,13 @@ object ApiKeyStore {
 
     fun set(ctx: Context, apiKey: String) {
         if (apiKey.isBlank()) {
-            prefs(ctx).edit().remove(PREF).apply()
+            prefs(ctx).edit { remove(PREF) }
             return
         }
         val cipher = Cipher.getInstance(TRANSFORM)
         cipher.init(Cipher.ENCRYPT_MODE, key())
         val encrypted = cipher.iv + cipher.doFinal(apiKey.toByteArray(Charsets.UTF_8))
-        prefs(ctx).edit().putString(PREF, Base64.encodeToString(encrypted, Base64.NO_WRAP)).apply()
+        prefs(ctx).edit { putString(PREF, Base64.encodeToString(encrypted, Base64.NO_WRAP)) }
     }
 
     private fun key(): SecretKey {

@@ -35,23 +35,16 @@ Open it on your phone, install it, then launch the app once to finish setup.
 
 ### Build from source
 
-Requires JDK 17 and Android SDK.
+Requires a JDK (17-27) and the Android SDK (platform 37, build-tools 36).
 
 ```bash
 git clone https://github.com/saltchang/whisalt-android.git && cd whisalt-android
 make build
 ```
 
-The sherpa-onnx native `.so` files are not committed. Before building, put them in `app/src/main/jniLibs/arm64-v8a/`:
+`make build` first runs `make deps`, which downloads the official [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) AAR (Kotlin API + native libraries) into `app/libs/` and verifies its SHA-256.
 
-```bash
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.12.28/sherpa-onnx-v1.12.28-android.tar.bz2
-tar xjf sherpa-onnx-v1.12.28-android.tar.bz2
-mkdir -p app/src/main/jniLibs/arm64-v8a
-cp jniLibs/arm64-v8a/*.so app/src/main/jniLibs/arm64-v8a/
-```
-
-`make` uses `JAVA_HOME` and `ANDROID_HOME` from your environment when set.
+`make` uses `ANDROID_HOME` from your environment, defaulting to `~/Android/Sdk` on Linux and `~/Library/Android/sdk` on macOS.
 
 APK output:
 
@@ -162,4 +155,4 @@ Once text is inserted into the native input box, Termux sends it to the terminal
 
 ## License
 
-Licensed under the [Apache License 2.0](LICENSE). Based on [Phone Whisper](https://github.com/kafkasl/phone-whisper) by Pol Alvarez; files under `app/src/main/kotlin/com/k2fsa/sherpa/onnx/` come from [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache License 2.0).
+Licensed under the [Apache License 2.0](LICENSE). Based on [Phone Whisper](https://github.com/kafkasl/phone-whisper) by Pol Alvarez; uses [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache License 2.0).

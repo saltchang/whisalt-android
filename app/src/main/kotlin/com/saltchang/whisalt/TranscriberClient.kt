@@ -38,7 +38,7 @@ object TranscriberClient {
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) = callback(Result(null, e.message))
             override fun onResponse(call: Call, response: Response) =
-                callback(parseResponse(response.body?.string() ?: ""))
+                callback(parseResponse(response.use { it.body.string() }))
         })
     }
 }

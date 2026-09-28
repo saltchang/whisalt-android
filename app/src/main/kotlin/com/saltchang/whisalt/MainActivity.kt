@@ -13,9 +13,12 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.widget.*
+import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.progressindicator.LinearProgressIndicator
 import com.google.android.material.materialswitch.MaterialSwitch
@@ -49,6 +52,7 @@ class MainActivity : AppCompatActivity() {
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         val root = vertical(0, 0)
@@ -140,7 +144,16 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(ScrollView(this).apply {
             setBackgroundColor(attrColor(android.R.attr.colorBackground))
+            clipToPadding = false
             addView(root)
+            // targetSdk 35+ draws behind the system bars; keep content clear of them
+            ViewCompat.setOnApplyWindowInsetsListener(this) { v, insets ->
+                val bars = insets.getInsets(
+                    WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+                )
+                v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                insets
+            }
         })
 
         if (!hasPerm(Manifest.permission.RECORD_AUDIO)) {
@@ -160,12 +173,12 @@ class MainActivity : AppCompatActivity() {
     private fun buildModelRow(model: Model): View {
         val radio = MaterialRadioButton(this).apply {
             isClickable = false
-            buttonTintList = ColorStateList.valueOf(attrColor(com.google.android.material.R.attr.colorPrimary))
+            buttonTintList = ColorStateList.valueOf(attrColor(androidx.appcompat.R.attr.colorPrimary))
         }
         val dlBtn = MaterialButton(this, null, com.google.android.material.R.attr.materialIconButtonStyle).apply {
             text = "↓"
             textSize = 18f
-            setTextColor(attrColor(com.google.android.material.R.attr.colorPrimary))
+            setTextColor(attrColor(androidx.appcompat.R.attr.colorPrimary))
         }
         
         val progress = LinearProgressIndicator(this).apply {
@@ -267,7 +280,7 @@ class MainActivity : AppCompatActivity() {
     private fun buildPromptRow(preset: PromptPreset): View {
         val radio = MaterialRadioButton(this).apply {
             isClickable = false
-            buttonTintList = ColorStateList.valueOf(attrColor(com.google.android.material.R.attr.colorPrimary))
+            buttonTintList = ColorStateList.valueOf(attrColor(androidx.appcompat.R.attr.colorPrimary))
         }
 
         val row = settingsRow(preset.title, preset.subtitle, radio) {
@@ -339,7 +352,7 @@ class MainActivity : AppCompatActivity() {
         val ready = audio && acc && (localReady || cloudReady) && postReady
 
         statusSubtitle.text = if (ready) "Ready — tap the overlay dot to dictate" else "Setup required"
-        statusSubtitle.setTextColor(if (ready) attrColor(com.google.android.material.R.attr.colorPrimary) else attrColor(android.R.attr.textColorSecondary))
+        statusSubtitle.setTextColor(if (ready) attrColor(androidx.appcompat.R.attr.colorPrimary) else attrColor(android.R.attr.textColorSecondary))
         
         refreshAllCards()
         refreshPromptRows()
@@ -430,7 +443,7 @@ class MainActivity : AppCompatActivity() {
         text = title
         textSize = 14f
         setTypeface(typeface, Typeface.BOLD)
-        setTextColor(attrColor(com.google.android.material.R.attr.colorPrimary)) // Neutral Android-like blue
+        setTextColor(attrColor(androidx.appcompat.R.attr.colorPrimary)) // Neutral Android-like blue
         setPadding(dp(24), dp(24), dp(24), dp(8))
     }
 

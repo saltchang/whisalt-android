@@ -5,18 +5,34 @@ PHONE_HOST ?= pixel-5
 SSH_PORT   ?= 8022
 APK        := app/build/outputs/apk/debug/app-debug.apk
 
-JAVA_HOME    ?= /opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+SHERPA_VERSION := 1.13.8
+SHERPA_SHA256  := 633c24321e06b1fe79feafa03ea16cbc0f8a286641e2da3559bac91bdb13bd96
+SHERPA_AAR     := app/libs/sherpa-onnx-$(SHERPA_VERSION).aar
+
+# Gradle uses JAVA_HOME if set, otherwise `java` on PATH (JDK 17-27)
+ifeq ($(shell uname),Darwin)
 ANDROID_HOME ?= $(HOME)/Library/Android/sdk
-export JAVA_HOME ANDROID_HOME
-export PATH := $(JAVA_HOME)/bin:$(PATH)
+else
+ANDROID_HOME ?= $(HOME)/Android/Sdk
+endif
+export ANDROID_HOME
 
-.PHONY: build test install adb-install push-model clean
+.PHONY: deps build test install adb-install push-model clean
 
-build:
+## Fetch the official sherpa-onnx AAR and verify its SHA-256
+deps: $(SHERPA_AAR)
+
+$(SHERPA_AAR):
+	mkdir -p $(dir $@)
+	curl -fL -o $@.tmp https://github.com/k2-fsa/sherpa-onnx/releases/download/v$(SHERPA_VERSION)/sherpa-onnx-$(SHERPA_VERSION).aar
+	echo "$(SHERPA_SHA256)  $@.tmp" | shasum -a 256 -c
+	mv $@.tmp $@
+
+build: deps
 	./gradlew assembleDebug
 	@echo "APK: $(APK)"
 
-test:
+test: deps
 	./gradlew testDebugUnitTest
 
 install: build

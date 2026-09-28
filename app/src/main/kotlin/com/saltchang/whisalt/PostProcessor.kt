@@ -108,7 +108,7 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
             }
 
             override fun onResponse(call: Call, response: Response) {
-                val responseBody = response.body?.string() ?: ""
+                val responseBody = response.use { it.body.string() }
                 if (!response.isSuccessful && responseBody.isBlank()) {
                     callback(Result(null, "HTTP ${response.code}"))
                     return
