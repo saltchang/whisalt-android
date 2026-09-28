@@ -332,7 +332,8 @@ class WhisperAccessibilityService : AccessibilityService() {
         } catch (_: SecurityException) { toast("Audio permission denied"); return }
 
         val local = localTranscriber
-        val session = if (prefs().getBoolean("use_local", true) && local != null)
+        // acquire() keeps this model loaded until the recording finishes, even if the user switches models
+        val session = if (prefs().getBoolean("use_local", true) && local != null && local.acquire())
             SegmentedTranscription(assets, local, Vocabulary.hotwords(prefs().getString(Vocabulary.HOTWORDS_PREF, "") ?: ""))
         else null
         val pcm = ByteArrayOutputStream()
@@ -433,7 +434,10 @@ class WhisperAccessibilityService : AccessibilityService() {
     private fun toTaiwanTraditional(text: String, language: String?) =
         if (ChineseConverter.isChinese(text, language)) chineseConverter.toTaiwan(text) else text
 
-    /** Taiwan Traditional first, then the user's `wrong => right` rules, which they write in Traditional. */
+    /**
+     * Taiwan Traditional first, then the user's `wrong => right` rules, which they write in Traditional.
+     * Applied once, to the raw transcript, so LLM cleanup already sees the corrected words.
+     */
     private fun finalizeText(text: String, language: String?): String {
         val rules = Vocabulary.replacements(prefs().getString(Vocabulary.REPLACEMENTS_PREF, "") ?: "")
         return Vocabulary.applyReplacements(toTaiwanTraditional(text, language), rules)
@@ -469,7 +473,7 @@ class WhisperAccessibilityService : AccessibilityService() {
             val prompt = prefs().getString("post_processing_prompt", PostProcessor.DEFAULT_PROMPT) ?: PostProcessor.DEFAULT_PROMPT
             
             PostProcessor.process(text, prompt, apiKey) { result ->
-                val cleaned = result.text?.takeIf { it.isNotBlank() }?.let { finalizeText(it, language) }
+                val cleaned = result.text?.takeIf { it.isNotBlank() }?.let { toTaiwanTraditional(it, language) }
                 handler.post {
                     if (cleaned != null) {
                         injectText(cleaned)

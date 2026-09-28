@@ -50,7 +50,10 @@ class SegmentedTranscription(
         }
     }
 
-    /** Waits for every segment; null if VAD heard no speech at all. Releases native resources. */
+    /**
+     * Waits for every segment; null if VAD heard no speech at all. Releases native resources and
+     * the use on [transcriber] that the caller took with [LocalTranscriber.acquire].
+     */
     fun finish(): LocalTranscriber.Transcript? = try {
         if (filled > 0) vad.acceptWaveform(window.copyOf(filled))
         vad.flush()
@@ -60,9 +63,14 @@ class SegmentedTranscription(
         release()
     }
 
+    private var released = false
+
     fun release() {
+        if (released) return
+        released = true
         worker.shutdownNow()
         vad.release()
+        transcriber.releaseUse()
     }
 
     private fun submitFinishedSegments() {
@@ -76,11 +84,14 @@ class SegmentedTranscription(
     companion object {
         private const val WINDOW = 512
 
-        /** Joins segment texts; a space only between two Latin letters/digits, as Chinese needs none. */
+        /**
+         * Joins segment texts. A space goes before a Latin word that follows ASCII text (a word or
+         * English punctuation such as "Hello."); Chinese and full-width punctuation need none.
+         */
         fun merge(parts: List<LocalTranscriber.Transcript>): LocalTranscriber.Transcript {
             val text = parts.map { it.text.trim() }.filter { it.isNotEmpty() }
                 .reduceOrNull { acc, next ->
-                    if (isLatinWordChar(acc.last()) && isLatinWordChar(next.first())) "$acc $next" else acc + next
+                    if (acc.last().code < 0x80 && isLatinWordChar(next.first())) "$acc $next" else acc + next
                 }.orEmpty()
             // Only keep a language every segment agrees on
             val language = parts.map { it.language }.distinct().singleOrNull()

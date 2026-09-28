@@ -12,6 +12,23 @@ import java.io.File
 class LocalTranscriber private constructor(private val recognizer: OfflineRecognizer) {
 
     private var released = false
+    private var users = 0
+    private var releaseRequested = false
+
+    /** Keeps the model alive for a whole recording; returns false if it is already being unloaded. */
+    @Synchronized
+    fun acquire(): Boolean {
+        if (released || releaseRequested) return false
+        users++
+        return true
+    }
+
+    /** Ends a use from [acquire]; frees the model if [release] was requested meanwhile. */
+    @Synchronized
+    fun releaseUse() {
+        users--
+        if (users == 0 && releaseRequested) free()
+    }
 
     /** [language] is the recognizer's detected language ("zh", "ja", ...), or null if it reports none. */
     data class Transcript(val text: String, val language: String?)
@@ -36,9 +53,14 @@ class LocalTranscriber private constructor(private val recognizer: OfflineRecogn
         return Transcript(result.text.trim(), language)
     }
 
-    /** Free native memory. Waits for any in-flight transcription to finish. */
+    /** Frees native memory once no recording is using the model. Waits for an in-flight decode. */
     @Synchronized
     fun release() {
+        releaseRequested = true
+        if (users == 0) free()
+    }
+
+    private fun free() {
         if (released) return
         released = true
         recognizer.release()
