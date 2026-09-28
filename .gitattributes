@@ -1,0 +1,4 @@
+# Gradle wrapper convention: LF in the repo, CRLF for Windows batch files on checkout
+/gradlew text eol=lf
+*.bat text eol=crlf
+*.jar binary
