@@ -110,12 +110,15 @@ Current catalog:
 
 | Model | Size | Notes |
 |---|---:|---|
-| Parakeet 110M | 100 MB | Best default |
+| SenseVoice | 166 MB | Chinese (with English mixed in), plus Japanese, Korean, Cantonese |
+| Parakeet 110M | 100 MB | Best default for English |
 | Whisper Base | 199 MB | Solid baseline |
 | Parakeet 0.6B | 465 MB | Best quality |
 | Moonshine Tiny | 103 MB | Fastest |
 
 The app downloads and extracts models directly from the sherpa-onnx release archives.
+
+Chinese transcripts are converted to Traditional Chinese with Taiwan phrasing (软件 → 軟體, 网络 → 網路), using the same OpenCC `s2twp` conversion as [OpenWhispr](https://github.com/OpenWhispr/openwhispr). The dictionaries in `app/src/main/assets/opencc/` come from [opencc-js](https://github.com/nk2028/opencc-js) 1.4.1 (MIT) and [OpenCC](https://github.com/BYVoid/OpenCC) (Apache License 2.0).
 
 ## Development
 

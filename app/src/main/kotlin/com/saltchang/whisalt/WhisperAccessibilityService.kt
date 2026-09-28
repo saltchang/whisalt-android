@@ -71,6 +71,9 @@ class WhisperAccessibilityService : AccessibilityService() {
     // Local transcription engine (loaded lazily)
     @Volatile private var localTranscriber: LocalTranscriber? = null
 
+    // Simplified -> Taiwan Traditional, same as OpenWhispr's s2twp (dictionaries load on first use)
+    private val chineseConverter by lazy { ChineseConverter { assets.open("opencc/$it") } }
+
     private val dp get() = resources.displayMetrics.density
     private val screenW get() = resources.displayMetrics.widthPixels
     private val screenH get() = resources.displayMetrics.heightPixels
@@ -78,8 +81,8 @@ class WhisperAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         instance = this
         showOverlay()
-        // Try to load local model in background
-        thread { initLocalModel() }
+        // Load local model and Chinese dictionaries in background
+        thread { initLocalModel(); chineseConverter }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
@@ -414,8 +417,12 @@ class WhisperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun handleTranscriptionResult(text: String?) {
-        if (text.isNullOrBlank()) {
+    /** Chinese output is shown in Taiwan Traditional; other languages pass through. Call off the main thread. */
+    private fun toTaiwanTraditional(text: String) =
+        if (ChineseConverter.isChinese(text)) chineseConverter.toTaiwan(text) else text
+
+    private fun handleTranscriptionResult(rawText: String?) {
+        if (rawText.isNullOrBlank()) {
             handler.post {
                 toast("No speech detected")
                 state = State.IDLE
@@ -424,6 +431,7 @@ class WhisperAccessibilityService : AccessibilityService() {
             }
             return
         }
+        val text = toTaiwanTraditional(rawText)
 
         val usePostProcessing = prefs().getBoolean("use_post_processing", false)
         val apiKey = ApiKeyStore.get(this)
@@ -443,9 +451,10 @@ class WhisperAccessibilityService : AccessibilityService() {
             val prompt = prefs().getString("post_processing_prompt", PostProcessor.DEFAULT_PROMPT) ?: PostProcessor.DEFAULT_PROMPT
             
             PostProcessor.process(text, prompt, apiKey) { result ->
+                val cleaned = result.text?.takeIf { it.isNotBlank() }?.let(::toTaiwanTraditional)
                 handler.post {
-                    if (result.text != null && result.text.isNotBlank()) {
-                        injectText(result.text)
+                    if (cleaned != null) {
+                        injectText(cleaned)
                     } else {
                         injectText(text, feedback = "Cleanup failed — raw copied to clipboard", feedbackDurationMs = 3000)
                     }

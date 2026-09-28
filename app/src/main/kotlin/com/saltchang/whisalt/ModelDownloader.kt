@@ -20,9 +20,12 @@ data class Model(
 )
 
 val MODEL_CATALOG = listOf(
+    Model("SenseVoice (中文)", "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09",
+        166, "★★★★ 中英夾雜・台灣繁體",
+        "7305f7905bfcf77fa0b39388a313f3da35c68d971661a65475b56fb2162c8e63", recommended = true),
     Model("Parakeet 110M", "sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8",
-        100, "★★★ Best value",
-        "17f945007b52ccd8b7200ffc7c5652e9e8e961dfdf479cefcabd06cf5703630b", recommended = true),
+        100, "★★★ Best value (English)",
+        "17f945007b52ccd8b7200ffc7c5652e9e8e961dfdf479cefcabd06cf5703630b"),
     Model("Whisper Base", "sherpa-onnx-whisper-base.en",
         199, "★★★",
         "475bc7052ce299c007f6d5d5407ba8601f819a2867f6eecee510ed17df581542"),

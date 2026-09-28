@@ -124,6 +124,21 @@ class LocalTranscriber private constructor(private val recognizer: OfflineRecogn
                 )
             }
 
+            // SenseVoice ships the same single model.int8.onnx layout as NeMo CTC; tell them apart by name
+            if (dir.name.contains("sense-voice")) {
+                return OfflineRecognizerConfig(
+                    modelConfig = OfflineModelConfig(
+                        senseVoice = OfflineSenseVoiceModelConfig(
+                            model = findFile(p, "model") ?: return null,
+                            language = "auto",
+                            useInverseTextNormalization = true,
+                        ),
+                        tokens = tokens,
+                        numThreads = 2,
+                    )
+                )
+            }
+
             // NeMo CTC (single model.onnx / model.int8.onnx)
             val ctcModel = findFile(p, "model")
             if (ctcModel != null) {
