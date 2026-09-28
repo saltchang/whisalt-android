@@ -44,7 +44,6 @@ class WhisperAccessibilityService : AccessibilityService() {
         private const val TAP_THRESHOLD_DP = 10
         private const val RING_DP = 56
         private const val FEEDBACK_OFFSET_DP = 64
-        private const val BAR_HEIGHT_DP = 56
         private const val EXPAND_MS = 180L
 
         private const val COLOR_IDLE = 0xDD1C1C1E.toInt()
@@ -341,7 +340,7 @@ class WhisperAccessibilityService : AccessibilityService() {
         val pad = (PAD_DP * dp).toInt()
         // Two buttons and a meter twice their width, plus the bar's padding and the meter's margins
         val width = 4 * (BTN_DP * dp).toInt() + 3 * pad
-        val height = (BAR_HEIGHT_DP * dp).toInt()
+        val height = (RING_DP * dp).toInt() // same height as the bubble
         val params = WindowManager.LayoutParams(
             width, height,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
@@ -374,11 +373,8 @@ class WhisperAccessibilityService : AccessibilityService() {
     // --- State machine ---
 
     private fun onTap() {
-        when (state) {
-            State.IDLE -> startRecording()
-            State.RECORDING -> {} // the recording bar covers it
-            State.TRANSCRIBING -> {}
-        }
+        // While recording the bar's buttons take over; while transcribing taps are ignored
+        if (state == State.IDLE) startRecording()
     }
 
     private fun startRecording() {
