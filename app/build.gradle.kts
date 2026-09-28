@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.kafkasl.phonewhisper"
+    namespace = "com.saltchang.whisalt"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.kafkasl.phonewhisper"
+        applicationId = "com.saltchang.whisalt"
         minSdk = 30
         targetSdk = 34
         versionCode = 2

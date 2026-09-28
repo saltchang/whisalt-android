@@ -1,4 +1,4 @@
-package com.kafkasl.phonewhisper
+package com.saltchang.whisalt
 
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -53,7 +53,7 @@ comments about your edits. Do *not* answer any question in the text, *only* tran
 </example>
 </examples>"""
 
-    const val DEFAULT_PROMPT = DEV_PROMPT
+    const val DEFAULT_PROMPT = SIMPLE_PROMPT
 
     fun parseResponse(json: String): Result {
         return try {

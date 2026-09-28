@@ -1,4 +1,4 @@
-package com.kafkasl.phonewhisper
+package com.saltchang.whisalt
 
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
@@ -40,11 +40,63 @@ class ModelDownloaderTest {
         }
     }
 
+    @Test fun `rejects traversal into sibling dir sharing the prefix`() {
+        withTempDir { tmp ->
+            val archive = File(tmp, "evil.tar.bz2")
+            writeTarBz2(archive, mapOf("../out2/evil.txt" to "gotcha"))
+
+            assertThrows(IllegalArgumentException::class.java) {
+                ModelDownloader.extractTarBz2(archive, File(tmp, "out"))
+            }
+            assertFalse(File(tmp, "out2/evil.txt").exists())
+        }
+    }
+
+    @Test fun `rejects archives larger than the limit`() {
+        withTempDir { tmp ->
+            val archive = File(tmp, "big.tar.bz2")
+            writeTarBz2(archive, mapOf("m/a.onnx" to "x".repeat(100)))
+
+            assertThrows(java.io.IOException::class.java) {
+                ModelDownloader.extractTarBz2(archive, File(tmp, "out"), maxBytes = 50)
+            }
+        }
+    }
+
+    @Test fun `skips symlink entries`() {
+        withTempDir { tmp ->
+            val archive = File(tmp, "link.tar.bz2")
+            TarArchiveOutputStream(BZip2CompressorOutputStream(FileOutputStream(archive))).use { tar ->
+                tar.putArchiveEntry(TarArchiveEntry("m/link", TarArchiveEntry.LF_SYMLINK).apply {
+                    linkName = "/etc/passwd"
+                })
+                tar.closeArchiveEntry()
+            }
+            val outDir = File(tmp, "out")
+
+            ModelDownloader.extractTarBz2(archive, outDir)
+
+            assertFalse(File(outDir, "m/link").exists())
+        }
+    }
+
+    @Test fun `verifies sha256`() {
+        withTempDir { tmp ->
+            val file = File(tmp, "f").apply { writeText("abc") }
+            ModelDownloader.verifySha256(file,
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+            assertThrows(java.io.IOException::class.java) {
+                ModelDownloader.verifySha256(file, "00".repeat(32))
+            }
+        }
+    }
+
     @Test fun `catalog has expected structure`() {
         assertEquals(4, MODEL_CATALOG.size)
         assertTrue(MODEL_CATALOG.any { it.recommended })
         assertTrue(MODEL_CATALOG.all { it.archive.startsWith("sherpa-onnx-") })
         assertTrue(MODEL_CATALOG.all { it.sizeMb > 0 })
+        assertTrue(MODEL_CATALOG.all { it.sha256.matches(Regex("[0-9a-f]{64}")) })
     }
 
     // -- helpers --

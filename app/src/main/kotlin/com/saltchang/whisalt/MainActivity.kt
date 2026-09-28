@@ -1,4 +1,4 @@
-package com.kafkasl.phonewhisper
+package com.saltchang.whisalt
 
 import android.Manifest
 import android.content.Intent
@@ -55,7 +55,7 @@ class MainActivity : AppCompatActivity() {
 
         // Top large header (like "Connected devices")
         val header = TextView(this).apply {
-            text = "Phone Whisper"
+            text = "Whisalt"
             textSize = 32f
             setPadding(dp(24), dp(64), dp(24), dp(24))
         }
@@ -308,7 +308,8 @@ class MainActivity : AppCompatActivity() {
         val acc = WhisperAccessibilityService.instance != null
         val useLocal = prefs().getBoolean("use_local", true)
         val usePostProcessing = prefs().getBoolean("use_post_processing", false)
-        val hasKey = !prefs().getString("api_key", "").isNullOrBlank()
+        val apiKey = ApiKeyStore.get(this)
+        val hasKey = apiKey.isNotBlank()
         val hasModel = LocalTranscriber.availableModels(this).isNotEmpty()
 
         audioRowSub.text = if (audio) "Granted" else "Tap to grant permission"
@@ -318,7 +319,6 @@ class MainActivity : AppCompatActivity() {
         promptContainer.visibility = if (usePostProcessing) View.VISIBLE else View.GONE
         promptRow.visibility = if (usePostProcessing) View.VISIBLE else View.GONE
 
-        val apiKey = prefs().getString("api_key", "") ?: ""
         keyRowSub.text = if (apiKey.isBlank()) "Tap to set" 
                          else if (apiKey.length > 7) "sk-...${apiKey.takeLast(4)}" 
                          else "sk-...***"
@@ -348,13 +348,13 @@ class MainActivity : AppCompatActivity() {
     private fun promptApiKey() {
         val input = EditText(this).apply {
             hint = "sk-..."
-            setText(prefs().getString("api_key", ""))
+            setText(ApiKeyStore.get(this@MainActivity))
         }
         android.app.AlertDialog.Builder(this)
             .setTitle("OpenAI API Key")
             .setView(input.apply { setPadding(dp(24), dp(8), dp(24), dp(8)) })
             .setPositiveButton("Save") { _, _ ->
-                prefs().edit().putString("api_key", input.text.toString().trim()).apply()
+                ApiKeyStore.set(this, input.text.toString().trim())
                 refresh()
             }
             .setNegativeButton("Cancel", null)
@@ -479,7 +479,7 @@ class MainActivity : AppCompatActivity() {
         ta.recycle()
         return color
     }
-    private fun prefs() = getSharedPreferences("phonewhisper", MODE_PRIVATE)
+    private fun prefs() = getSharedPreferences("whisalt", MODE_PRIVATE)
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 
     companion object {

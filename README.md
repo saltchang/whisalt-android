@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="docs/logo.svg" width="128" height="128" alt="Phone Whisper Logo">
+  <img src="docs/logo.svg" width="128" height="128" alt="Whisalt Logo">
 </p>
 
-# Phone Whisper
+# Whisalt
 
 Push-to-talk dictation for Android.
 
-Phone Whisper lets you speak into most apps without switching keyboards. Tap the floating button, speak, tap again, and your text is inserted into the currently focused text field when the app exposes a standard Android input field.\
+Whisalt lets you speak into most apps without switching keyboards. Tap the floating button, speak, tap again, and your text is inserted into the currently focused text field when the app exposes a standard Android input field.\
 
 It supports:
 
@@ -14,7 +14,7 @@ It supports:
 - **Cloud transcription** with OpenAI Whisper
 - **Optional cleanup** with OpenAI to fix punctuation and grammar
 
-If you try it and it genuinely saves you time, consider [sponsoring](https://github.com/sponsors/kafkasl)
+Whisalt is a fork of [Phone Whisper](https://github.com/kafkasl/phone-whisper) by Pol Alvarez.
 
 
 ## Why I built this
@@ -29,7 +29,7 @@ If you try it and it genuinely saves you time, consider [sponsoring](https://git
 
 ### Easiest: download the APK
 
-Grab the latest APK from [GitHub Releases](https://github.com/kafkasl/phone-whisper/releases).
+Grab the latest APK from [GitHub Releases](https://github.com/saltchang/whisalt-android/releases).
 
 Open it on your phone, install it, then launch the app once to finish setup.
 
@@ -38,9 +38,20 @@ Open it on your phone, install it, then launch the app once to finish setup.
 Requires JDK 17 and Android SDK.
 
 ```bash
-git clone https://github.com/kafkasl/phone-whisper.git && cd phone-whisper
+git clone https://github.com/saltchang/whisalt-android.git && cd whisalt-android
 make build
 ```
+
+The sherpa-onnx native `.so` files are not committed. Before building, put them in `app/src/main/jniLibs/arm64-v8a/`:
+
+```bash
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.12.28/sherpa-onnx-v1.12.28-android.tar.bz2
+tar xjf sherpa-onnx-v1.12.28-android.tar.bz2
+mkdir -p app/src/main/jniLibs/arm64-v8a
+cp jniLibs/arm64-v8a/*.so app/src/main/jniLibs/arm64-v8a/
+```
+
+`make` uses `JAVA_HOME` and `ANDROID_HOME` from your environment when set.
 
 APK output:
 
@@ -67,7 +78,7 @@ make adb-install
 
 ### First-time setup
 
-1. Open **Phone Whisper**
+1. Open **Whisalt**
 2. Grant the **audio recording** permission
 3. Enable the **Accessibility Service**
 4. Choose your transcription mode:
@@ -78,13 +89,13 @@ Once setup is done, the floating button is ready.
 
 ## Why does it need Accessibility?
 
-Phone Whisper uses Android Accessibility Service for one narrow reason: to insert dictated text into the currently focused text field across apps.
+Whisalt uses Android Accessibility Service for one narrow reason: to insert dictated text into the currently focused text field across apps.
 
 It does **not** replace your keyboard. It does **not** run background automation. It only acts after you explicitly tap the overlay button.
 
 ## Privacy
 
-Phone Whisper supports two modes:
+Whisalt supports two modes:
 
 - **Local mode**: audio stays on-device
 - **Cloud mode**: audio is sent directly from your device to OpenAI's transcription API
@@ -99,7 +110,7 @@ Full policy: [PRIVACY.md](PRIVACY.md)
 Models are stored in app storage under:
 
 ```bash
-/data/data/com.kafkasl.phonewhisper/files/models/
+/data/data/com.saltchang.whisalt/files/models/
 ```
 
 Current catalog:
@@ -124,15 +135,15 @@ make clean       # clean build artifacts
 
 ## App compatibility
 
-Phone Whisper works best in apps that use standard Android text fields.
+Whisalt works best in apps that use standard Android text fields.
 Some apps use custom text surfaces or terminal-style views, which may not support direct accessibility paste.
-When insertion is not possible, Phone Whisper falls back to copying the transcript to the clipboard.
+When insertion is not possible, Whisalt falls back to copying the transcript to the clipboard.
 
 ### Termux
 
 Termux's main terminal area is not a standard Android text field, so direct insertion may not work there.
 
-To use Phone Whisper in Termux:
+To use Whisalt in Termux:
 
 1. Focus Termux
 2. Swipe the extra keys row (`ESC`, `CTRL`, `ALT`, arrows, etc.) left or right
@@ -149,12 +160,6 @@ Once text is inserted into the native input box, Termux sends it to the terminal
 - Local models are large
 - Cloud mode requires your own OpenAI API key
 
-## Support the project
-
-If Phone Whisper saves you time, you can sponsor the project on GitHub:
-
-- https://github.com/sponsors/kafkasl
-
 ## License
 
-Personal project. Do whatever you want with it.
+Licensed under the [Apache License 2.0](LICENSE). Based on [Phone Whisper](https://github.com/kafkasl/phone-whisper) by Pol Alvarez; files under `app/src/main/kotlin/com/k2fsa/sherpa/onnx/` come from [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache License 2.0).

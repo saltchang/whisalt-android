@@ -1,4 +1,4 @@
-package com.kafkasl.phonewhisper
+package com.saltchang.whisalt
 
 import org.junit.Assert.*
 import org.junit.Test

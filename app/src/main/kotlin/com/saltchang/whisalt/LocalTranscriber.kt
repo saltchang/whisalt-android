@@ -1,4 +1,4 @@
-package com.kafkasl.phonewhisper
+package com.saltchang.whisalt
 
 import android.content.Context
 import android.util.Log
@@ -11,14 +11,26 @@ import java.io.File
  */
 class LocalTranscriber private constructor(private val recognizer: OfflineRecognizer) {
 
+    private var released = false
+
     /** Transcribe raw PCM float samples. Blocking — call from background thread. */
+    @Synchronized
     fun transcribe(samples: FloatArray, sampleRate: Int = 16000): String {
+        check(!released) { "Model was unloaded" }
         val stream = recognizer.createStream()
         stream.acceptWaveform(samples, sampleRate)
         recognizer.decode(stream)
         val result = recognizer.getResult(stream)
         stream.release()
         return result.text.trim()
+    }
+
+    /** Free native memory. Waits for any in-flight transcription to finish. */
+    @Synchronized
+    fun release() {
+        if (released) return
+        released = true
+        recognizer.release()
     }
 
     companion object {

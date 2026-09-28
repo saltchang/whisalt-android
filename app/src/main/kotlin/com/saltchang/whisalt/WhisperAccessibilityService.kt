@@ -1,4 +1,4 @@
-package com.kafkasl.phonewhisper
+package com.saltchang.whisalt
 
 import android.accessibilityservice.AccessibilityService
 import android.content.ClipData
@@ -13,6 +13,7 @@ import android.media.MediaRecorder
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PersistableBundle
 import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
@@ -33,7 +34,7 @@ class WhisperAccessibilityService : AccessibilityService() {
 
     companion object {
         var instance: WhisperAccessibilityService? = null
-        private const val TAG = "PhoneWhisper"
+        private const val TAG = "Whisalt"
         private const val SAMPLE_RATE = 16000
         private const val BTN_DP = 44
         private const val PAD_DP = 10
@@ -68,7 +69,7 @@ class WhisperAccessibilityService : AccessibilityService() {
     }
 
     // Local transcription engine (loaded lazily)
-    private var localTranscriber: LocalTranscriber? = null
+    @Volatile private var localTranscriber: LocalTranscriber? = null
 
     private val dp get() = resources.displayMetrics.density
     private val screenW get() = resources.displayMetrics.widthPixels
@@ -90,23 +91,20 @@ class WhisperAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
+    @Synchronized
     private fun initLocalModel() {
         val modelName = prefs().getString("model_name", "") ?: ""
-        if (modelName.isBlank()) {
+        val name = modelName.ifBlank {
             // Auto-detect first available model
-            val models = LocalTranscriber.availableModels(this)
-            if (models.isNotEmpty()) {
-                Log.i(TAG, "Auto-detected model: ${models.first()}")
-                localTranscriber = LocalTranscriber.create(this, models.first())
-            }
-        } else {
-            localTranscriber = LocalTranscriber.create(this, modelName)
+            LocalTranscriber.availableModels(this).firstOrNull()
+                ?.also { Log.i(TAG, "Auto-detected model: $it") }
         }
-        if (localTranscriber != null) {
-            Log.i(TAG, "Local transcription ready")
-        } else {
-            Log.i(TAG, "No local model found, will use API")
-        }
+        // Detach before release so no new transcription picks up the old recognizer
+        val old = localTranscriber
+        localTranscriber = null
+        old?.release()
+        localTranscriber = name?.let { LocalTranscriber.create(this, it) }
+        Log.i(TAG, if (localTranscriber != null) "Local transcription ready" else "No local model loaded")
     }
 
     /** Reload local model (called from MainActivity when settings change) */
@@ -313,7 +311,7 @@ class WhisperAccessibilityService : AccessibilityService() {
     private fun startRecording() {
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
             != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            toast("Grant audio permission in Phone Whisper app"); return
+            toast("Grant audio permission in Whisalt app"); return
         }
 
         val bufSize = AudioRecord.getMinBufferSize(
@@ -360,10 +358,11 @@ class WhisperAccessibilityService : AccessibilityService() {
         val useLocal = prefs().getBoolean("use_local", true)
         val local = localTranscriber
 
-        if (useLocal && local != null) {
-            transcribeLocal(pcm, local)
-        } else {
-            transcribeApi(pcm)
+        when {
+            !useLocal -> transcribeApi(pcm)
+            local != null -> transcribeLocal(pcm, local)
+            // Never fall back to the cloud when local mode is selected
+            else -> reset("Local model not ready. Download or select one in Whisalt.")
         }
     }
 
@@ -398,8 +397,8 @@ class WhisperAccessibilityService : AccessibilityService() {
 
     private fun transcribeApi(pcm: ByteArray) {
         val wav = WavWriter.encode(pcm)
-        val apiKey = prefs().getString("api_key", "") ?: ""
-        if (apiKey.isBlank()) { reset("Set API key in Phone Whisper app"); return }
+        val apiKey = ApiKeyStore.get(this)
+        if (apiKey.isBlank()) { reset("Set API key in Whisalt app"); return }
 
         TranscriberClient.transcribe(wav, apiKey) { result ->
             if (result.text != null && result.text.isNotBlank()) {
@@ -427,7 +426,7 @@ class WhisperAccessibilityService : AccessibilityService() {
         }
 
         val usePostProcessing = prefs().getBoolean("use_post_processing", false)
-        val apiKey = prefs().getString("api_key", "") ?: ""
+        val apiKey = ApiKeyStore.get(this)
 
         if (usePostProcessing) {
             if (apiKey.isBlank()) {
@@ -475,12 +474,12 @@ class WhisperAccessibilityService : AccessibilityService() {
     // --- Text injection ---
 
     private fun injectText(
-        text: String,
+        rawText: String,
         feedback: String? = "Copied to clipboard",
         feedbackDurationMs: Long = 2000
     ) {
-        val clip = ClipData.newPlainText("phonewhisper", text)
-        (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
+        val text = TextSanitizer.forTextField(rawText)
+        setClipboard(text)
         feedback?.let { showFeedback(it, feedbackDurationMs) }
 
         val candidates = findInjectionCandidates()
@@ -499,6 +498,17 @@ class WhisperAccessibilityService : AccessibilityService() {
         }
 
         Log.i(TAG, if (injected) "Text injection action reported success" else "No injection action succeeded; clipboard fallback only")
+    }
+
+    private fun setClipboard(text: String) {
+        val clip = ClipData.newPlainText("whisalt", text).apply {
+            // Keep transcripts out of clipboard previews and keyboard clipboard history.
+            // Literal key: ClipDescription.EXTRA_IS_SENSITIVE is API 33+, keyboards honor it earlier.
+            description.extras = PersistableBundle().apply {
+                putBoolean("android.content.extra.IS_SENSITIVE", true)
+            }
+        }
+        (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
     }
 
     private fun findInjectionCandidates(): List<AccessibilityNodeInfo> {
@@ -522,7 +532,10 @@ class WhisperAccessibilityService : AccessibilityService() {
                 root.recycle()
             }
 
-        return candidates.sortedByDescending(::candidateScore)
+        // Only target what the user is focused on; never paste into some other field on screen
+        val (focused, others) = candidates.partition { it.isFocused || it.isAccessibilityFocused }
+        others.forEach { it.recycle() }
+        return focused.sortedByDescending(::candidateScore)
     }
 
     private fun collectInjectionCandidates(
@@ -572,8 +585,13 @@ class WhisperAccessibilityService : AccessibilityService() {
         return score
     }
 
-    private fun tryInjectIntoNode(node: AccessibilityNodeInfo, text: String): Boolean {
+    private fun tryInjectIntoNode(node: AccessibilityNodeInfo, fieldText: String): Boolean {
         logNode("Trying node", node)
+
+        val isTerminal = node.className?.toString()?.contains("TerminalView") == true
+        val text = if (isTerminal) TextSanitizer.forTerminal(fieldText) else fieldText
+        // Pastes read the clipboard, so a terminal must get the single-line version there too
+        if (isTerminal) setClipboard(text)
 
         node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
 
@@ -587,7 +605,8 @@ class WhisperAccessibilityService : AccessibilityService() {
         Log.i(TAG, "ACTION_PASTE => $pasteOk")
         if (pasteOk) return true
 
-        if (node.isEditable || node.className?.toString()?.contains("EditText") == true) {
+        if (!isTerminal && !node.isPassword &&
+            (node.isEditable || node.className?.toString()?.contains("EditText") == true)) {
             val current = node.text?.toString().orEmpty()
             val start = if (node.textSelectionStart >= 0) node.textSelectionStart else current.length
             val end = if (node.textSelectionEnd >= 0) node.textSelectionEnd else start
@@ -619,10 +638,10 @@ class WhisperAccessibilityService : AccessibilityService() {
         }
         Log.i(
             TAG,
-            "$prefix package=${node.packageName} class=${node.className} focused=${node.isFocused} editable=${node.isEditable} text=${node.text} desc=${node.contentDescription} actions=[$actions]"
+            "$prefix package=${node.packageName} class=${node.className} focused=${node.isFocused} editable=${node.isEditable} actions=[$actions]"
         )
     }
 
-    private fun prefs() = getSharedPreferences("phonewhisper", MODE_PRIVATE)
+    private fun prefs() = getSharedPreferences("whisalt", MODE_PRIVATE)
     private fun toast(msg: String) { handler.post { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show() } }
 }
