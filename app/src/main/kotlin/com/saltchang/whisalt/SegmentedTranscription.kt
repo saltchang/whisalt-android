@@ -51,22 +51,22 @@ class SegmentedTranscription(
     }
 
     /**
-     * Waits for every segment. If VAD heard no speech at all, decodes [fullAudio] instead, still with
-     * this recording's model. Then releases native resources and the use on [transcriber] that the
-     * caller took with [LocalTranscriber.acquire].
+     * Waits for every segment, then releases native resources and the use on [transcriber] that
+     * the caller took with [LocalTranscriber.acquire]. Empty when VAD heard no speech, so a
+     * mis-tap returns at once instead of decoding silence (which also invites hallucinations).
      */
-    fun finish(fullAudio: () -> FloatArray): LocalTranscriber.Transcript = try {
+    fun finish(): LocalTranscriber.Transcript = try {
         if (filled > 0) vad.acceptWaveform(window.copyOf(filled))
         vad.flush()
         submitFinishedSegments()
-        if (segments.isEmpty()) transcriber.transcribe(fullAudio(), hotwords = hotwords)
-        else merge(segments.map { it.get() })
+        merge(segments.map { it.get() })
     } finally {
         release()
     }
 
     private var released = false
 
+    /** Also cancels the recording: pending segments are dropped. */
     fun release() {
         if (released) return
         released = true

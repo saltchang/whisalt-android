@@ -23,10 +23,12 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 import kotlin.math.abs
 
@@ -42,12 +44,15 @@ class WhisperAccessibilityService : AccessibilityService() {
         private const val TAP_THRESHOLD_DP = 10
         private const val RING_DP = 56
         private const val FEEDBACK_OFFSET_DP = 64
+        private const val BAR_HEIGHT_DP = 56
+        private const val EXPAND_MS = 180L
 
         private const val COLOR_IDLE = 0xDD1C1C1E.toInt()
-        private const val COLOR_RECORDING = 0xDDEF4444.toInt()
         private const val COLOR_BUSY = 0xDD6B6B6B.toInt()
         private const val COLOR_FEEDBACK_BG = 0xEE1C1C1E.toInt()
         private const val COLOR_RING = 0xFFE8EAED.toInt()
+        private const val COLOR_CANCEL = 0xFF48484A.toInt()
+        private const val COLOR_DONE = 0xFF22A559.toInt()
     }
 
     private enum class State { IDLE, RECORDING, TRANSCRIBING }
@@ -63,6 +68,11 @@ class WhisperAccessibilityService : AccessibilityService() {
     private var audioRecord: AudioRecord? = null
     private var pcmStream: ByteArrayOutputStream? = null
     private var recordingThread: Thread? = null
+    // Tells the current recording thread to stop; each recording gets its own flag and AudioRecord
+    private var recordingActive: AtomicBoolean? = null
+    // Cancel / level meter / done, shown in place of the bubble while recording
+    private var recordingBar: LinearLayout? = null
+    private var levelMeter: LevelMeterView? = null
     // Decodes speech while the user is still talking (local mode only)
     private var segmentedTranscription: SegmentedTranscription? = null
     private val handler = Handler(Looper.getMainLooper())
@@ -214,12 +224,28 @@ class WhisperAccessibilityService : AccessibilityService() {
         }
         positionFeedback(feedbackParams, params)
 
+        val meter = LevelMeterView(this)
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = pill(COLOR_IDLE)
+            setPadding(pad / 2, pad / 2, pad / 2, pad / 2)
+            addView(barButton(R.drawable.ic_close, COLOR_CANCEL, "Cancel recording") { cancelRecording() })
+            // Cancel : meter : done = 1 : 2 : 1
+            addView(meter, LinearLayout.LayoutParams(2 * buttonSize, buttonSize / 2).apply {
+                marginStart = pad; marginEnd = pad
+            })
+            addView(barButton(R.drawable.ic_check, COLOR_DONE, "Finish recording") { stopAndTranscribe() })
+        }
+
         wm.addView(overlay, params)
         wm.addView(feedback, feedbackParams)
         overlayView = overlay
         button = img
         spinner = ring
         feedbackView = feedback
+        recordingBar = bar
+        levelMeter = meter
         layoutParams = params
         feedbackLayoutParams = feedbackParams
     }
@@ -234,6 +260,9 @@ class WhisperAccessibilityService : AccessibilityService() {
             wm.removeView(it)
             feedbackView = null
         }
+        recordingBar?.let { if (it.isAttachedToWindow) wm.removeView(it) }
+        recordingBar = null
+        levelMeter = null
         button = null
         spinner = null
         layoutParams = null
@@ -290,19 +319,56 @@ class WhisperAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun startPulse() {
-        button?.let {
-            it.animate().alpha(0.4f).setDuration(500).withEndAction {
-                it.animate().alpha(1f).setDuration(500).withEndAction {
-                    if (state == State.RECORDING) startPulse()
-                }.start()
-            }.start()
+    private fun barButton(icon: Int, color: Int, label: String, onClick: () -> Unit): ImageView {
+        val size = (BTN_DP * dp).toInt()
+        val pad = (PAD_DP * dp).toInt()
+        return ImageView(this).apply {
+            setImageResource(icon)
+            setPadding(pad, pad, pad, pad)
+            background = circle(color)
+            contentDescription = label
+            setOnClickListener { onClick() }
+            layoutParams = LinearLayout.LayoutParams(size, size)
         }
     }
 
-    private fun stopPulse() {
-        button?.animate()?.cancel()
-        button?.alpha = 1f
+    /** Swaps the bubble for the recording bar, which grows out of the bubble toward the screen center. */
+    private fun showRecordingBar() {
+        val bar = recordingBar ?: return
+        val bubble = overlayView ?: return
+        val bubbleParams = layoutParams ?: return
+        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        val pad = (PAD_DP * dp).toInt()
+        // Two buttons and a meter twice their width, plus the bar's padding and the meter's margins
+        val width = 4 * (BTN_DP * dp).toInt() + 3 * pad
+        val height = (BAR_HEIGHT_DP * dp).toInt()
+        val params = WindowManager.LayoutParams(
+            width, height,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT
+        )
+        // Anchored on the bubble's outer edge: a bubble docked right expands leftward, and vice versa
+        val onRight = bubbleParams.x + bubbleParams.width / 2 > screenW / 2
+        val margin = (MARGIN_DP * dp).toInt()
+        params.gravity = Gravity.TOP or Gravity.START
+        params.x = (if (onRight) bubbleParams.x + bubbleParams.width - width else bubbleParams.x)
+            .coerceIn(margin, maxOf(margin, screenW - width - margin))
+        params.y = bubbleParams.y + (bubbleParams.height - height) / 2
+        levelMeter?.clear()
+        bubble.visibility = View.INVISIBLE
+        if (!bar.isAttachedToWindow) wm.addView(bar, params)
+        bar.pivotX = if (onRight) width.toFloat() else 0f
+        bar.pivotY = height / 2f
+        bar.scaleX = height.toFloat() / width
+        bar.alpha = 0.6f
+        bar.animate().scaleX(1f).alpha(1f).setDuration(EXPAND_MS).start()
+    }
+
+    private fun hideRecordingBar() {
+        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+        recordingBar?.let { if (it.isAttachedToWindow) wm.removeView(it) }
+        overlayView?.visibility = View.VISIBLE
     }
 
     // --- State machine ---
@@ -310,7 +376,7 @@ class WhisperAccessibilityService : AccessibilityService() {
     private fun onTap() {
         when (state) {
             State.IDLE -> startRecording()
-            State.RECORDING -> stopAndTranscribe()
+            State.RECORDING -> {} // the recording bar covers it
             State.TRANSCRIBING -> {}
         }
     }
@@ -324,7 +390,7 @@ class WhisperAccessibilityService : AccessibilityService() {
         val bufSize = AudioRecord.getMinBufferSize(
             SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
         )
-        audioRecord = try {
+        val record = try {
             AudioRecord(
                 MediaRecorder.AudioSource.MIC, SAMPLE_RATE,
                 AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufSize
@@ -339,40 +405,63 @@ class WhisperAccessibilityService : AccessibilityService() {
         val pcm = ByteArrayOutputStream()
         pcmStream = pcm
         segmentedTranscription = session
-        audioRecord!!.startRecording()
+        val active = AtomicBoolean(true)
+        audioRecord = record
+        recordingActive = active
+        record.startRecording()
         state = State.RECORDING
         setBusy(false)
-        setAppearance(COLOR_RECORDING)
-        startPulse()
+        showRecordingBar()
 
         recordingThread = thread {
             val buf = ByteArray(bufSize)
-            while (state == State.RECORDING) {
-                val n = audioRecord?.read(buf, 0, buf.size) ?: break
-                if (n > 0) {
-                    pcm.write(buf, 0, n)
-                    session?.accept(pcm16ToFloat(buf, n))
-                }
+            // Its own flag and AudioRecord: a new recording may start before this thread winds down
+            while (active.get()) {
+                val n = record.read(buf, 0, buf.size)
+                if (n <= 0) break
+                pcm.write(buf, 0, n)
+                session?.accept(pcm16ToFloat(buf, n))
+                val level = LevelMeterView.level(buf, n)
+                handler.post { levelMeter?.push(level) }
             }
         }
     }
 
-    private fun stopAndTranscribe() {
-        state = State.TRANSCRIBING
-        stopPulse()
-        setAppearance(COLOR_BUSY)
-        setBusy(true)
-
-        audioRecord?.stop()
-        audioRecord?.release()
+    /** Stops the microphone and hands back the recording thread, its PCM and its session. */
+    private fun detachRecording(): Triple<Thread?, ByteArrayOutputStream?, SegmentedTranscription?> {
+        recordingActive?.set(false)
+        recordingActive = null
+        val record = audioRecord
         audioRecord = null
-
-        val recorder = recordingThread
-        val pcmOut = pcmStream
-        val session = segmentedTranscription
+        val detached = Triple(recordingThread, pcmStream, segmentedTranscription)
         recordingThread = null
         pcmStream = null
         segmentedTranscription = null
+        // stop() unblocks the thread's read(); release() waits until the thread is done with it
+        record?.stop()
+        thread { detached.first?.join(); record?.release() }
+        return detached
+    }
+
+    /** Drops the recording without transcribing; the bubble is ready for the next one at once. */
+    private fun cancelRecording() {
+        if (state != State.RECORDING) return
+        state = State.IDLE
+        hideRecordingBar()
+        setAppearance(COLOR_IDLE)
+        val (recorder, _, session) = detachRecording()
+        // May wait for a segment that is mid-decode, so off the main thread
+        thread { recorder?.join(); session?.release() }
+    }
+
+    private fun stopAndTranscribe() {
+        if (state != State.RECORDING) return
+        state = State.TRANSCRIBING
+        hideRecordingBar()
+        setAppearance(COLOR_BUSY)
+        setBusy(true)
+
+        val (recorder, pcmOut, session) = detachRecording()
 
         val useLocal = prefs().getBoolean("use_local", true)
         thread {
@@ -393,8 +482,8 @@ class WhisperAccessibilityService : AccessibilityService() {
     private fun transcribeLocal(pcm: ByteArray, session: SegmentedTranscription) {
         try {
             val t0 = System.currentTimeMillis()
-            // Most segments were decoded while recording; only the tail (or, without speech, all) remains
-            val transcript = session.finish { pcm16ToFloat(pcm, pcm.size) }
+            // Most segments were decoded while recording; only the tail remains
+            val transcript = session.finish()
             Log.i(TAG, "Local transcription: ${System.currentTimeMillis() - t0}ms after stop, ${pcm.size / 2 / SAMPLE_RATE}s audio")
 
             handleTranscriptionResult(transcript.text, transcript.language)
