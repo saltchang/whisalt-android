@@ -63,12 +63,12 @@ make adb-install
 
 ## How it works
 
-1. A small overlay button floats on screen
+1. A small overlay button floats on screen while the keyboard is open
 2. Tap it to start recording; it expands into cancel, a level meter and done
 3. Tap done to transcribe, or cancel to drop the recording
 4. Audio is transcribed locally or in the cloud. In local mode, speech is decoded at each pause while you are still talking, and a recording without speech is skipped
-5. The text is inserted into the focused text field
-6. If insertion fails, the text is copied to the clipboard
+5. The text is written into the focused text field, leaving your clipboard untouched
+6. If the field does not accept it, the text is pasted from, and left on, the clipboard
 
 ## Setup
 
@@ -81,7 +81,7 @@ make adb-install
    - **Local**: download a model in the app
    - **Cloud**: paste your OpenAI API key
 
-Once setup is done, the floating button is ready.
+Once setup is done, the floating button appears whenever a keyboard is open.
 
 ## Why does it need Accessibility?
 

@@ -13,7 +13,6 @@ import android.media.MediaRecorder
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.PersistableBundle
 import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
@@ -21,6 +20,7 @@ import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -58,6 +58,10 @@ class WhisperAccessibilityService : AccessibilityService() {
 
     // Read by the recording thread, written from the main and transcription threads
     @Volatile private var state = State.IDLE
+        set(value) {
+            field = value
+            handler.post { updateBubbleVisibility() }
+        }
     private var overlayView: FrameLayout? = null
     private var button: ImageView? = null
     private var spinner: ProgressBar? = null
@@ -94,11 +98,14 @@ class WhisperAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         instance = this
         showOverlay()
+        updateBubbleVisibility()
         // Load local model and Chinese dictionaries in background
         thread { initLocalModel(); chineseConverter }
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) updateBubbleVisibility()
+    }
     override fun onInterrupt() {}
 
     override fun onDestroy() {
@@ -370,6 +377,27 @@ class WhisperAccessibilityService : AccessibilityService() {
         overlayView?.visibility = View.VISIBLE
     }
 
+    private fun keyboardShown() = windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+
+    /**
+     * The bubble shows only while a keyboard is open, so it is there when there is somewhere to type.
+     * A recording or transcription in progress keeps it, even if the keyboard closes meanwhile.
+     */
+    private fun updateBubbleVisibility() {
+        val bubble = overlayView ?: return
+        val params = layoutParams ?: return
+        if (state == State.RECORDING) return // the recording bar stands in for the bubble
+        val show = state == State.TRANSCRIBING || keyboardShown()
+        bubble.visibility = if (show) View.VISIBLE else View.GONE
+        // A hidden bubble's window would still swallow taps on the app beneath it
+        val flags = if (show) params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            else params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        if (flags != params.flags) {
+            params.flags = flags
+            (getSystemService(WINDOW_SERVICE) as WindowManager).updateViewLayout(bubble, params)
+        }
+    }
+
     // --- State machine ---
 
     private fun onTap() {
@@ -561,7 +589,7 @@ class WhisperAccessibilityService : AccessibilityService() {
                     if (cleaned != null) {
                         injectText(cleaned)
                     } else {
-                        injectText(text, feedback = "Cleanup failed — raw copied to clipboard", feedbackDurationMs = 3000)
+                        injectText(text, note = "Cleanup failed — raw text used")
                     }
                     state = State.IDLE
                     setBusy(false)
@@ -587,14 +615,12 @@ class WhisperAccessibilityService : AccessibilityService() {
 
     // --- Text injection ---
 
-    private fun injectText(
-        rawText: String,
-        feedback: String? = "Copied to clipboard",
-        feedbackDurationMs: Long = 2000
-    ) {
+    /**
+     * Writes the text into the focused field, leaving the user's clipboard alone; only when no field
+     * takes it does the text go to the clipboard. [note] is prepended to the feedback shown.
+     */
+    private fun injectText(rawText: String, note: String? = null) {
         val text = TextSanitizer.forTextField(rawText)
-        setClipboard(text)
-        feedback?.let { showFeedback(it, feedbackDurationMs) }
 
         val candidates = findInjectionCandidates()
         Log.i(TAG, "Injecting text into ${candidates.size} candidate node(s)")
@@ -612,16 +638,17 @@ class WhisperAccessibilityService : AccessibilityService() {
         }
 
         Log.i(TAG, if (injected) "Text injection action reported success" else "No injection action succeeded; clipboard fallback only")
+        // A failed paste may have left the terminal version on the clipboard
+        if (!injected) setClipboard(text)
+        val feedback = if (injected) null else "Copied to clipboard"
+        listOfNotNull(note, feedback).takeIf { it.isNotEmpty() }?.let {
+            showFeedback(it.joinToString("\n"), if (note != null) 3000 else 2000)
+        }
     }
 
     private fun setClipboard(text: String) {
-        val clip = ClipData.newPlainText("whisalt", text).apply {
-            // Keep transcripts out of clipboard previews and keyboard clipboard history.
-            // Literal key: ClipDescription.EXTRA_IS_SENSITIVE is API 33+, keyboards honor it earlier.
-            description.extras = PersistableBundle().apply {
-                putBoolean("android.content.extra.IS_SENSITIVE", true)
-            }
-        }
+        // Not marked sensitive: the user checks the transcript in clipboard previews and history
+        val clip = ClipData.newPlainText("whisalt", text)
         (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(clip)
     }
 
@@ -704,10 +731,37 @@ class WhisperAccessibilityService : AccessibilityService() {
 
         val isTerminal = node.className?.toString()?.contains("TerminalView") == true
         val text = if (isTerminal) TextSanitizer.forTerminal(fieldText) else fieldText
-        // Pastes read the clipboard, so a terminal must get the single-line version there too
-        if (isTerminal) setClipboard(text)
 
         node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+
+        // Setting the text directly leaves the clipboard alone, so it goes first
+        if (!isTerminal && !node.isPassword &&
+            (node.isEditable || node.className?.toString()?.contains("EditText") == true)) {
+            // An empty field reports its hint as its text
+            val current = if (node.isShowingHintText) "" else node.text?.toString().orEmpty()
+            val start = if (node.textSelectionStart >= 0) node.textSelectionStart else current.length
+            val end = if (node.textSelectionEnd >= 0) node.textSelectionEnd else start
+            val replacementStart = minOf(start, end).coerceAtMost(current.length)
+            val replacementEnd = maxOf(start, end).coerceAtMost(current.length)
+            val updated = current.replaceRange(replacementStart, replacementEnd, text)
+            val args = Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, updated)
+            }
+            val setTextOk = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+            Log.i(TAG, "ACTION_SET_TEXT => $setTextOk")
+            if (setTextOk) {
+                // Setting text moves the cursor to the end; put it right after the insertion
+                val cursor = replacementStart + text.length
+                node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle().apply {
+                    putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, cursor)
+                    putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, cursor)
+                })
+                return true
+            }
+        }
+
+        // Pastes read the clipboard; a terminal gets the single-line version
+        setClipboard(text)
 
         findCustomPasteAction(node)?.let { action ->
             val ok = node.performAction(action.id)
@@ -718,25 +772,6 @@ class WhisperAccessibilityService : AccessibilityService() {
         val pasteOk = node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
         Log.i(TAG, "ACTION_PASTE => $pasteOk")
         if (pasteOk) return true
-
-        if (!isTerminal && !node.isPassword &&
-            (node.isEditable || node.className?.toString()?.contains("EditText") == true)) {
-            val current = node.text?.toString().orEmpty()
-            val start = if (node.textSelectionStart >= 0) node.textSelectionStart else current.length
-            val end = if (node.textSelectionEnd >= 0) node.textSelectionEnd else start
-            val replacementStart = minOf(start, end)
-            val replacementEnd = maxOf(start, end)
-            val updated = current.replaceRange(replacementStart, replacementEnd, text)
-            val args = Bundle().apply {
-                putCharSequence(
-                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                    updated
-                )
-            }
-            val setTextOk = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-            Log.i(TAG, "ACTION_SET_TEXT => $setTextOk")
-            if (setTextOk) return true
-        }
 
         return false
     }
